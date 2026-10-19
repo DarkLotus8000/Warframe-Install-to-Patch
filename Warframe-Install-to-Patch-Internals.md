@@ -105,6 +105,4 @@ passes. Interactive status colors match NCT; logs remain ANSI-free.
 | `data/offline_patch_audit.py`, `data/stripped_archive.py` | Deep validation, stripped enrichment and video audit |
 | `data/export_transaction.py`, `data/common.py` | Safe publication, source fingerprints, HTTP retry and logging |
 
-The pinned x64 `data/oo2core_9.dll` is required and distributed with this
-archive. It is third-party software; GPLv3 covers the project source, not
-that binary. Check its redistribution rights before public release.
+The required x64 `data/oo2core_9.dll` is bundled and SHA-256 pinned.

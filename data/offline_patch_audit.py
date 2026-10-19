@@ -8,7 +8,8 @@ are not expected to have every on-demand CDN object locally installed.
 """
 from __future__ import annotations
 
-import argparse
+from common import StrictArgumentParser
+
 import hashlib
 import json
 import struct
@@ -34,14 +35,14 @@ def inspect_piece(entry: w.CacheEntry, size_cache: dict[Path, int], oodle: w.Ood
         w.decompress_cache_entry(entry, oodle)
 
 def validate_selected_pieces(index, asset: w.ManifestAsset, h_entry: w.CacheEntry,
-                             sizes: dict[Path, int], oodle: w.Oodle, *, deep: bool) -> None:
+        sizes: dict[Path, int], oodle: w.Oodle, *, deep: bool) -> None:
     inspect_piece(h_entry, sizes, oodle, False)  # H has already been decoded to match its hash.
     for kind in w._required_piece_kinds(asset.flags):
         entries = [e for e in w._entries_for(index, asset.namespace, asset.logical_path, kind)
-                   if e.package == h_entry.package]
+            if e.package == h_entry.package]
         if len(entries) != 1:
             raise w.ExportError(f'Required {kind} piece count is {len(entries)} for '
-                                f'{asset.namespace}{asset.logical_path} in {h_entry.package}')
+                f'{asset.namespace}{asset.logical_path} in {h_entry.package}')
         inspect_piece(entries[0], sizes, oodle, deep)
 
 def parse_shcc_sections(payload: bytes, asset: w.ManifestAsset, oodle: w.Oodle, *, with_trailer: bool) -> None:
@@ -142,15 +143,15 @@ def verify_cdn_payload(path: Path, asset: w.ManifestAsset, oodle: w.Oodle) -> st
     return verify_cdn_bytes(path.read_bytes(), asset, oodle)
 
 def audit(*, target: Path, base: Path, patch: Path | None = None,
-          recovered_cdn: Path | None = None, recovered_h_only: Path | None = None,
-          u4401_patch: Path | None = None, u4401_report: Path | None = None,
-          deep_pieces: bool = False, deep_patch: bool = False,
-          max_examples: int = 100, progress: int = 25000, manifest_type: int = 0xE,
-          type_evidence_path: Path | None = None, allow_cross_version_types: bool = False,
-          allow_bundled_types: bool = True, require_complete: bool = False,
-          required_manifest_families: tuple[str, ...] = (),
-          static_type_recovery: bool = False, require_static_types: bool = False,
-          oodle: w.Oodle | None = None) -> dict:
+        recovered_cdn: Path | None = None, recovered_h_only: Path | None = None,
+        u4401_patch: Path | None = None, u4401_report: Path | None = None,
+        deep_pieces: bool = False, deep_patch: bool = False,
+        max_examples: int = 100, progress: int = 25000, manifest_type: int = 0xE,
+        type_evidence_path: Path | None = None, allow_cross_version_types: bool = False,
+        allow_bundled_types: bool = True, require_complete: bool = False,
+        required_manifest_families: tuple[str, ...] = (),
+        static_type_recovery: bool = False, require_static_types: bool = False,
+        oodle: w.Oodle | None = None) -> dict:
     """Return a structured, bounded report; no filesystem writes or network calls."""
     if require_static_types and not static_type_recovery:
         raise w.ExportError("--require-static-types conflicts with --no-static-type-recovery")
@@ -167,7 +168,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
     if allow_cross_version_types and type_evidence_path is None:
         raise w.ExportError('--allow-cross-version-types requires --type-evidence')
     hints = (w.load_type_evidence(type_evidence_path, allow_cross_version=allow_cross_version_types)
-             if type_evidence_path is not None else {})
+        if type_evidence_path is not None else {})
     oodle = oodle or w.Oodle(Path(w.__file__).resolve().parent)
     print(f'[Audit] Reference: {target}')
     print(f'[Audit] Steam base: {base}')
@@ -212,7 +213,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
             installed_resolver = prepare(target_exe, ti, oodle, required=require_static_types)
             if installed_resolver is not None:
                 preflight_pinned_types(installed_resolver, ti, oodle, assets,
-                                       required=require_static_types)
+                    required=require_static_types)
 
     from recovery_imports import RecoveredCdnCollection
     from recovery_imports import RecoveredHOnlyCollection
@@ -223,7 +224,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
     if u4401 is not None:
         for protected in (target, base, patch):
             if protected is not None and (protected == u4401.root or protected.is_relative_to(u4401.root)
-                                          or u4401.root.is_relative_to(protected)):
+                    or u4401.root.is_relative_to(protected)):
                 raise w.ExportError('U44.0.1 source overlaps target/base/output patch')
     video_keys = set(videos.rows) if videos else set()
     h_only_keys = set(h_only.rows) if h_only else set()
@@ -246,7 +247,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         issue_counts[code] += 1
         if len(examples) < max_examples:
             examples.append({'issue': code, 'namespace': asset.namespace, 'path': asset.logical_path,
-                             'manifest_hash': asset.hash_b64, 'detail': detail[:320]})
+                'manifest_hash': asset.hash_b64, 'detail': detail[:320]})
 
     if missing_required and not require_complete:
         issue_counts['required-manifest-family-unavailable'] += len(missing_required)
@@ -259,7 +260,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         issue_counts['manifest-family-unavailable'] += len(missing_families)
         for family in missing_families[:max(0, max_examples - len(examples))]:
             examples.append({'issue': 'manifest-family-unavailable',
-                             'path': family['family'], 'detail': family['reason'][:320]})
+                'path': family['family'], 'detail': family['reason'][:320]})
 
     def verify_file(asset: w.ManifestAsset, type_id: int) -> None:
         if patch_root is None:
@@ -301,7 +302,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         selected = None
         try:
             selected = w._select_h_by_hash(ti, asset.namespace, asset.logical_path,
-                                           asset.manifest_hash, oodle, required_piece_kinds=required)
+                asset.manifest_hash, oodle, required_piece_kinds=required)
         except w.SourceCoverageError:
             pass
         except w.ExportError as exc:
@@ -373,7 +374,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         if same:
             try:
                 base_selected = w._select_h_by_hash(bi, asset.namespace, asset.logical_path,
-                                                      asset.manifest_hash, oodle, required_piece_kinds=required)
+                    asset.manifest_hash, oodle, required_piece_kinds=required)
                 validate_selected_pieces(bi, asset, base_selected[0], size_cache, oodle, deep=deep_pieces)
                 counts['matching_base_required_pieces_verified'] += len(required)
             except (OSError, w.ExportError) as exc:
@@ -398,9 +399,9 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
             counts['proactive_duplicate_package_refresh'] += 1
             if len(examples) < max_examples:
                 examples.append({'issue': 'duplicate-package-refresh-required',
-                                 'namespace': asset.namespace, 'path': asset.logical_path,
-                                 'manifest_hash': asset.hash_b64,
-                                 'detail': 'Stale/missing packages: ' + ', '.join(stale_duplicate_packages)})
+                    'namespace': asset.namespace, 'path': asset.logical_path,
+                    'manifest_hash': asset.hash_b64,
+                    'detail': 'Stale/missing packages: ' + ', '.join(stale_duplicate_packages)})
         try:
             from installed_type_resolver import evidence_for_asset
             cdn_type, type_source = w.resolve_common_header_type(
@@ -414,7 +415,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
             type_counts['header-inferred-unconfirmed'] += 1
             if len(unchecked_type_examples) < min(12, max_examples):
                 unchecked_type_examples.append({'namespace': asset.namespace, 'path': asset.logical_path,
-                                                'header_type': f'{h_type:X}', 'cdn_type': f'{cdn_type:X}'})
+                    'header_type': f'{h_type:X}', 'cdn_type': f'{cdn_type:X}'})
         else:
             type_counts[type_source] += 1
         verify_file(asset, cdn_type)
@@ -423,7 +424,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         try:
             h_entry, _ = w._select_h_cache(ti, oodle)
             expected_metadata = [(f'H.Cache.bin!{manifest_type:X}_' + w.H_CACHE_SENTINEL_HASH,
-                                  w.build_shcc(h_entry, None, None))]
+                w.build_shcc(h_entry, None, None))]
             for rec in records:
                 if rec.logical_path not in {m['family'] for m in metadata}:
                     continue
@@ -484,8 +485,8 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
                 issue_counts['patch-export-not-finished'] += 1
                 if len(examples) < max_examples:
                     examples.append({'issue': 'patch-export-not-finished',
-                                     'path': str(marker),
-                                     'detail': 'Patch export is interrupted or failed; do not use this output'})
+                        'path': str(marker),
+                        'detail': 'Patch export is interrupted or failed; do not use this output'})
     if video_keys - used_video:
         issue_counts['unused-video-recovery-evidence'] += len(video_keys - used_video)
         for key in sorted(video_keys - used_video)[:max(0, max_examples - len(examples))]:
@@ -500,7 +501,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
             examples.append({'issue': 'unused-u4401-recovery-evidence', 'namespace': key[0], 'path': key[1]})
     # Include an explicit zero-valued summary when the local-only run succeeds.
     for key in ('local_source_unresolved', 'local_source_unresolved_video',
-                'local_source_unresolved_h_only', 'local_source_unresolved_other'):
+            'local_source_unresolved_h_only', 'local_source_unresolved_other'):
         counts.setdefault(key, 0)
     if counts['local_source_unresolved']:
         print(f'[Local-only coverage] Missing {counts["local_source_unresolved"]:,} manifest objects: '
@@ -515,7 +516,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
     counts['manifest_families_explicitly_required'] = len(required_manifest_families)
     counts['manifest_families_required_available'] = len(required_manifest_families) - len(missing_required)
     expected_written = (counts['export_candidates'] + counts['recovered_videos']
-                        + counts['recovered_h_only'] + counts['recovered_u4401_exact'])
+        + counts['recovered_h_only'] + counts['recovered_u4401_exact'])
     counts['expected_export_files'] = expected_written
     # No metadata or unchanged/inherited file needs a CDN payload in the patch.
     report = {
@@ -523,20 +524,20 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         'generated_utc': datetime.now(timezone.utc).isoformat(),
         'reference': str(target), 'base': str(base), 'patch_checked': str(patch) if patch else None,
         'modes': {'deep_pieces': deep_pieces, 'deep_patch': deep_patch,
-                  'static_type_recovery': static_type_recovery,
-                  'require_static_types': require_static_types,
-                  'require_complete': require_complete,
-                  'required_manifest_families': list(required_manifest_families),
-                  'bundled_type_hints': allow_bundled_types,
-                  'prior_recovery_cdn_source_provided': recovered_cdn is not None,
-                  'prior_recovery_h_only_source_provided': recovered_h_only is not None,
-                  'u4401_exact_source_provided': u4401_patch is not None},
+        'static_type_recovery': static_type_recovery,
+        'require_static_types': require_static_types,
+        'require_complete': require_complete,
+        'required_manifest_families': list(required_manifest_families),
+        'bundled_type_hints': allow_bundled_types,
+        'prior_recovery_cdn_source_provided': recovered_cdn is not None,
+        'prior_recovery_h_only_source_provided': recovered_h_only is not None,
+        'u4401_exact_source_provided': u4401_patch is not None},
         'manifest_coverage': {
             'all_h_cache_families_available': not missing_families,
             'required_installed_scope_available': not missing_required,
             'coverage_label': ('all-families' if not missing_families else
-                               'verified-declared-scope-only' if required_manifest_families and not missing_required else
-                               'partial-not-fully-scoped'),
+        'verified-declared-scope-only' if required_manifest_families and not missing_required else
+        'partial-not-fully-scoped'),
         },
         'counts': dict(sorted(counts.items())), 'cdn_type_evidence': dict(sorted(type_counts.items())),
         'header_inferred_not_independently_confirmed_examples': unchecked_type_examples,
@@ -556,7 +557,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
     return report
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = StrictArgumentParser(description=__doc__, repeatable_destinations={'required_manifest_family'})
     parser.add_argument('target', type=Path, help='Untouched reference Final-U44 install')
     parser.add_argument('base', type=Path, help='Untouched original Steam base')
     parser.add_argument('--patch', type=Path, help='Already exported patch folder (optional post-export check)')
@@ -572,13 +573,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--allow-cross-version-types', action='store_true')
     parser.add_argument('--no-bundled-type-hints', action='store_true')
     parser.add_argument('--static-type-recovery', action='store_true',
-                        help='recover native CDN type IDs from verified installed EXE and Packages.bin')
+        help='recover native CDN type IDs from verified installed EXE and Packages.bin')
     parser.add_argument('--require-static-types', action='store_true',
-                        help='require static type recovery and five pinned type preflights')
+        help='require static type recovery and five pinned type preflights')
     parser.add_argument('--required-manifest-family', action='append', default=[], metavar='/B.Cache.NAME.bin',
-                        help='require this exact H.Cache-listed family; repeat for explicitly audited installed configuration')
+        help='require this exact H.Cache-listed family; repeat for explicitly audited installed configuration')
     parser.add_argument('--require-complete', action='store_true',
-                        help='treat B.Cache families unavailable from both target and matching-hash Steam base as hard issues')
+        help='treat B.Cache families unavailable from both target and matching-hash Steam base as hard issues')
     parser.add_argument('-o', '--output', type=Path, default=Path(f'offline-patch-audit-v{w.VERSION}.json'))
     args = parser.parse_args(argv)
     if args.deep_patch and args.patch is None:
@@ -589,16 +590,16 @@ def main(argv: list[str] | None = None) -> int:
             if source is not None and (output == source.resolve() or output.is_relative_to(source.resolve())):
                 raise w.ExportError('Audit report must be outside source, patch, and recovery folders')
         report = audit(target=args.target, base=args.base, patch=args.patch,
-                       recovered_cdn=args.recovered_cdn, recovered_h_only=args.recovered_h_only,
-                       u4401_patch=args.u4401_patch, u4401_report=args.u4401_report,
-                       deep_pieces=args.deep_pieces, deep_patch=args.deep_patch,
-                       max_examples=args.max_examples, progress=args.progress, manifest_type=args.manifest_type,
-                       type_evidence_path=args.type_evidence, allow_cross_version_types=args.allow_cross_version_types,
-                       allow_bundled_types=not args.no_bundled_type_hints,
-                       static_type_recovery=args.static_type_recovery or args.require_static_types,
-                       require_static_types=args.require_static_types,
-                       require_complete=args.require_complete,
-                       required_manifest_families=tuple(args.required_manifest_family))
+            recovered_cdn=args.recovered_cdn, recovered_h_only=args.recovered_h_only,
+            u4401_patch=args.u4401_patch, u4401_report=args.u4401_report,
+            deep_pieces=args.deep_pieces, deep_patch=args.deep_patch,
+            max_examples=args.max_examples, progress=args.progress, manifest_type=args.manifest_type,
+            type_evidence_path=args.type_evidence, allow_cross_version_types=args.allow_cross_version_types,
+            allow_bundled_types=not args.no_bundled_type_hints,
+            static_type_recovery=args.static_type_recovery or args.require_static_types,
+            require_static_types=args.require_static_types,
+            require_complete=args.require_complete,
+            required_manifest_families=tuple(args.required_manifest_family))
         output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
         c = report['counts']
         print(f'[Audit summary] {c["manifest_objects"]:,} manifest objects | unchanged {c.get("unchanged_base", 0):,} | '

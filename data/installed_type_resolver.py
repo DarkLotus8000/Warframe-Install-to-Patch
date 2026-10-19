@@ -207,14 +207,14 @@ def exe_native_types(exe: Path) -> tuple[dict[str,set[int]], dict]:
         # crash boundary; write TSV files only to this private scratch space.
         try:
             cp = subprocess.run([sys.executable, str(Path(__file__).resolve()),
-                                 '--scan-native-types', str(exe), str(tempdir)],
-                                capture_output=True, text=True, timeout=240,
-                                env=os.environ.copy())
+                '--scan-native-types', str(exe), str(tempdir)],
+                capture_output=True, text=True, timeout=240,
+                env=os.environ.copy())
         except subprocess.TimeoutExpired as exc:
             raise ProbeError('Executable type extraction timed out') from exc
         if cp.returncode:
             raise ProbeError(f'EXE extraction failed using pefile; check optional dependencies. Tail: ' +
-                             (cp.stderr or cp.stdout)[-1200:])
+                (cp.stderr or cp.stdout)[-1200:])
         source = tempdir/'native_types.tsv'
         if not source.is_file():
             raise ProbeError('EXE extractor did not produce native_types.tsv')
@@ -229,7 +229,7 @@ def exe_native_types(exe: Path) -> tuple[dict[str,set[int]], dict]:
             types[parts[1]].add(int(parts[0],16))
             rows += 1
         return types, {"exe_variant": label, "exe_sha256":digest, "native_rows":rows,
-                       "native_names":len(types), "extractor_output":cp.stdout[-1500:], "pe_backend":"pefile"}
+            "native_names":len(types), "extractor_output":cp.stdout[-1500:], "pe_backend":"pefile"}
 
 def resolve_parent_type(child: str, parents: dict[str,str | None], native: dict[str,set[int]]) -> dict:
     chain: list[str] = []
@@ -265,7 +265,7 @@ def resolve_parent_type(child: str, parents: dict[str,str | None], native: dict[
             "native_matches":candidates, "derived_type_hex":f"0x{derived:X}" if derived is not None else None,
             "derivation_status":"unique-native-type" if derived is not None else
             ('ambiguous-packages-parent' if status == 'ambiguous-packages-parent' else
-             'conflicting-native-types' if len(types)>1 else 'unresolved')}
+        'conflicting-native-types' if len(types)>1 else 'unresolved')}
 
 # ---- Installed build-gated resolver ----
 class InstalledTypeResolver:
@@ -296,8 +296,11 @@ class InstalledTypeResolver:
                 self._cache[path] = w.TypeEvidence(int(value, 16), 'installed-native-parent')
         return self._cache[path]
 
-def evidence_for_asset(resolver: InstalledTypeResolver | None,
-                       asset: w.ManifestAsset, header_type: int | None) -> w.TypeEvidence | None:
+def evidence_for_asset(
+    resolver: InstalledTypeResolver | None,
+    asset: w.ManifestAsset,
+    header_type: int | None,
+) -> w.TypeEvidence | None:
     """Share the exact same native-evidence eligibility rule with the auditor."""
     if resolver is None or asset.namespace != '0':
         return None
@@ -332,8 +335,10 @@ def prepare(target_exe: Path, target_index, oodle: w.Oodle, *, required: bool = 
         return None
     try:
         native, details = exe_native_types(target_exe)
-        entries = [e for e in w._entries_for(target_index, '0', '/Packages.bin', 'H')
-                   if e.package.casefold() == 'misc']
+        entries = [
+            e for e in w._entries_for(target_index, '0', '/Packages.bin', 'H')
+            if e.package.casefold() == 'misc'
+        ]
         if not entries:
             raise ProbeError('Verified /Packages.bin entry not found in installed H.Misc.toc')
         raw, _selected = load_verified_h(entries, EXPECTED_PACKAGES_HASH, oodle)
@@ -346,7 +351,7 @@ def prepare(target_exe: Path, target_index, oodle: w.Oodle, *, required: bool = 
     return InstalledTypeResolver(parents, native)
 
 def preflight_pinned_types(resolver: InstalledTypeResolver, target_index, oodle: w.Oodle,
-                           manifest_assets: list[w.ManifestAsset], *, required: bool = False) -> int:
+        manifest_assets: list[w.ManifestAsset], *, required: bool = False) -> int:
     """Cross-check the five hash-locked hints *before* creating output.
 
     All selected H bytes must match the manifest digest, not merely the path.
@@ -370,12 +375,12 @@ def preflight_pinned_types(resolver: InstalledTypeResolver, target_index, oodle:
         if derived is None:
             if required:
                 raise w.ExportError(f'Static type unresolved for {asset.logical_path}: '
-                                    f"{resolver.unresolved.get(asset.logical_path)}")
+                    f"{resolver.unresolved.get(asset.logical_path)}")
             print(f'[Static types] {asset.logical_path}: unresolved native/Packages chain; legacy fallback retained')
             continue
         if derived.type_id != fallback.type_id:
             raise w.ExportError(f'Static type disagrees with bundled U44 evidence for {asset.logical_path}: '
-                                f'installed 0x{derived.type_id:X}, bundled 0x{fallback.type_id:X}')
+                f'installed 0x{derived.type_id:X}, bundled 0x{fallback.type_id:X}')
         count += 1
     if required and count != len(w._BUILTIN_U44_TYPES):
         raise w.ExportError(f'Static type preflight verified {count}/{len(w._BUILTIN_U44_TYPES)} pinned U44 resources')
@@ -414,8 +419,8 @@ def _scan_executable_types(exe_path: Path, output_dir: Path) -> None:
     M64 = (1 << 64) - 1
     FULL = {}
     for r64, r32, r16, r8 in [("rax","eax","ax","al"),("rbx","ebx","bx","bl"),("rcx","ecx","cx","cl"),("rdx","edx","dx","dl"),
-                              ("rsi","esi","si","sil"),("rdi","edi","di","dil"),("rbp","ebp","bp","bpl"),("rsp","esp","sp","spl")] + \
-                             [(f"r{i}", f"r{i}d", f"r{i}w", f"r{i}b") for i in range(8, 16)]:
+            ("rsi","esi","si","sil"),("rdi","edi","di","dil"),("rbp","ebp","bp","bpl"),("rsp","esp","sp","spl")] + \
+            [(f"r{i}", f"r{i}d", f"r{i}w", f"r{i}b") for i in range(8, 16)]:
         FULL[r64] = (r64, 64); FULL[r32] = (r64, 32); FULL[r16] = (r64, 16); FULL[r8] = (r64, 8)
     class Fail(Exception): pass
     def run(fn, dl, max_steps=400, globals_=None):

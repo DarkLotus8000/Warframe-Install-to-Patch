@@ -23,65 +23,61 @@ if not DATA_DIR.is_dir():
 sys.path.insert(0, str(DATA_DIR))
 
 import rebuild_pristine_u4400 as core
-from common import PRODUCT_VERSION, StrictArgumentParser, error as print_error, warning as print_warning
-
-RELEASE = PRODUCT_VERSION
+from common import VERSION, StrictArgumentParser, error as print_error, warning as print_warning
 
 def parser() -> StrictArgumentParser:
     p = StrictArgumentParser(
         description='Reconstruct and deep-verify an update patch (currently supports U44.0.0 EN/DX11).',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument('-v', '--version', action='version', version=f'Warframe Install-to-Patch {RELEASE}')
+    p.add_argument('-v', '--version', action='version', version=f'Warframe Install-to-Patch {VERSION}')
     p.add_argument('-t', '--target', type=Path, required=True,
-                   help='Untouched final installation (current profile: U44.0.0 EN/DX11)')
+        help='Untouched final installation (current profile: U44.0.0 EN/DX11)')
     p.add_argument('-b', '--base', type=Path, required=True,
-                   help='Untouched original Steam base')
+        help='Untouched original Steam base')
     p.add_argument('-u', '--source-patch', '--u4401', dest='u4401', type=Path, required=True,
-                   help='Exact-identity recovery patch (current profile requires U44.0.1)')
+        help='Exact-identity recovery patch (current profile requires U44.0.1)')
     output = p.add_mutually_exclusive_group(required=True)
     output.add_argument('-P', '--output-parent', type=Path,
-                   help='Parent directory for a uniquely named new patch')
+        help='Parent directory for a uniquely named new patch')
     output.add_argument('-o', '--output', type=Path,
-                   help='Optional exact new patch directory (MUST NOT already exist)')
+        help='Optional exact new patch directory (MUST NOT already exist)')
     p.add_argument('-w', '--work-parent', type=Path,
-                   help=r'Short-lived work parent, default <target drive>\WF-Rebuild')
+        help=r'Short-lived work parent, default <target drive>\WF-Rebuild')
     p.add_argument('-l', '--logs-dir', type=Path, default=ROOT / 'logs',
-                   help='Permanent flat log folder; each run produces <timestamp>.log and <timestamp>.json')
+        help='Permanent flat log folder; each run produces <timestamp>.log and <timestamp>.json')
     p.add_argument('-r', '--cdn-retries', type=int, default=5,
-                   help='Maximum attempts per exact CDN object, including integrity failures (1..20)')
+        help='Maximum attempts per exact CDN object, including integrity failures (1..20)')
     p.add_argument('-T', '--cdn-timeout', type=float, default=30.0,
-                   help='Per-request timeout for historical CDN and optional H.Cache download (seconds)')
+        help='Per-request timeout for historical CDN and optional H.Cache download (seconds)')
     p.add_argument('-H', '--h-cache-build-label', type=str,
-                   help='Optional exact OpenWF H.Cache archive buildLabel (YYYY.MM.DD.HH.MM/22-char-id); default: autodetect from EXE if possible')
+        help='Optional exact OpenWF H.Cache archive buildLabel (YYYY.MM.DD.HH.MM/22-char-id); default: autodetect from EXE if possible')
     p.add_argument('-f', '--full-source-hash', action='store_true',
-                   help='SHA-256 every cache payload in addition to TOCs/selected payloads (slow)')
+        help='SHA-256 every cache payload in addition to TOCs/selected payloads (slow)')
     p.add_argument('-a', '--all-stripped', action='store_true',
-                   help='Include every original stripped object from the installed manifests; fail closed if any cannot be verified')
+        help='Include every original stripped object from the installed manifests; fail closed if any cannot be verified')
     p.add_argument('-c', '--stripped-cdn-fallback', action='store_true',
-                   help='With --all-stripped, allow exact manifest hash/type/size CDN fallback after local reconstruction fails')
+        help='With --all-stripped, allow exact manifest hash/type/size CDN fallback after local reconstruction fails')
     p.add_argument('-e', '--keep-failed-output', action='store_true',
-                   help='Keep failed temporary patch for investigation; never publish it')
+        help='Keep failed temporary patch for investigation; never publish it')
     p.add_argument('-k', '--keep-workspace', action='store_true',
-                   help='Keep isolated recovery bytes for debugging; later runs never reuse them')
+        help='Keep isolated recovery bytes for debugging; later runs never reuse them')
     return p
 
 def _save_json_atomic(path: Path, data: dict) -> None:
     """Write logs without a partially overwritten/truncated result."""
-    with tempfile.NamedTemporaryFile('w', prefix='.wf-log-', suffix='.tmp',
-                                     dir=path.parent, delete=False, encoding='utf-8') as f:
-        temp = Path(f.name)
-        try:
+    temp = None
+    try:
+        with tempfile.NamedTemporaryFile('w', prefix='.wf-log-', suffix='.tmp',
+                dir=path.parent, delete=False, encoding='utf-8') as f:
+            temp = Path(f.name)
             json.dump(data, f, indent=2, ensure_ascii=False)
             f.write('\n')
-        except BaseException:
-            temp.unlink(missing_ok=True)
-            raise
-    try:
         if path.exists() or path.is_symlink():
             raise FileExistsError(f'Refusing to overwrite an existing log: {path}')
         temp.rename(path)
     finally:
-        temp.unlink(missing_ok=True)
+        if temp is not None:
+            temp.unlink(missing_ok=True)
 
 def consolidate_logs(logs: Path, run_id: str, exit_code: int, fatal: str | None = None) -> tuple[Path, Path]:
     """Flatten one run's many private audit JSONs into TWO timestamped public log files.
@@ -105,7 +101,7 @@ def consolidate_logs(logs: Path, run_id: str, exit_code: int, fatal: str | None 
     workflow = evidence.get('workflow-result.json', {})
     summary = {
         'kind': 'warframe-install-to-patch-run',
-        'release': RELEASE,
+        'release': VERSION,
         'reconstruction_engine': core.w.VERSION,
         'run_id': run_id,
         'exit_code': exit_code,
@@ -149,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
             p.error(str(exc))
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
     logs = opts.logs_dir.resolve(strict=False)
-    print(f'[Install-to-Patch {RELEASE}] Recovery profile: U44.0.0 EN/DX11')
+    print(f'[Install-to-Patch {VERSION}] Recovery profile: U44.0.0 EN/DX11')
     print('[Inputs] Only installed target manifests and independently authenticated recovery objects')
     print('[Run] One command; no earlier run data, no runtime-request list, no old patch reuse')
     print(f'[Logs] {logs / (run_id + ".log")} and {logs / (run_id + ".json")}')

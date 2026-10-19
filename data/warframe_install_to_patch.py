@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from common import PRODUCT_VERSION, error as print_error, warning as print_warning
+from common import StrictArgumentParser, VERSION, error as print_error, warning as print_warning
 
 import argparse
 import base64
@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-VERSION = PRODUCT_VERSION.removeprefix("v")
 OODLE_DLL_NAME = "oo2core_9.dll"
 OODLE_X64_SHA256 = "19452ae1abae65e1305d3818354d4fae7b1200294322f0d9c6d5ddeb7bd9f978"
 OODLE_X64_SIZE = 582656
@@ -177,9 +176,9 @@ def resolve_common_header_type(
     supplied = (evidence or {}).get(key)
     filename_type, mapping_source = _observed_cdn_filename_type(asset, parsed_type)
     reported = [("installed-cache CDN mapping" if mapping_source else "installed cache", filename_type),
-                ("user evidence", supplied.type_id if supplied else None),
-                ("bundled U44", local.type_id if local else None),
-                ("installed native parent", installed_type.type_id if installed_type else None)]
+        ("user evidence", supplied.type_id if supplied else None),
+        ("bundled U44", local.type_id if local else None),
+        ("installed native parent", installed_type.type_id if installed_type else None)]
     types = {value for _source, value in reported if value is not None}
     if len(types) > 1:
         desc = ", ".join(f"{source}=0x{value:X}" for source, value in reported if value is not None)
@@ -193,7 +192,7 @@ def resolve_common_header_type(
     if local is not None:
         return local.type_id, local.strength
     raise ExportError(f"Could not recover CommonHeader type for {asset.namespace}{asset.logical_path}; "
-                      "the installed H entry has no recognized type, and no hash-matched evidence is available")
+        "the installed H entry has no recognized type, and no hash-matched evidence is available")
 
 def load_type_evidence(
     path: Path,
@@ -368,14 +367,14 @@ class Oodle:
         try:
             identify = library.OodleLZ_GetFirstChunkCompressor
             identify.argtypes = [ctypes.c_void_p, ctypes.c_ssize_t,
-                                 ctypes.POINTER(ctypes.c_int)]
+                ctypes.POINTER(ctypes.c_int)]
             identify.restype = ctypes.c_int
         except AttributeError as exc:
             raise ExportError("Bundled Oodle DLL lacks stream identification") from exc
         source = ctypes.create_string_buffer(compressed, len(compressed))
         independent = ctypes.c_int(0)
         codec = int(identify(ctypes.cast(source, ctypes.c_void_p),
-                             len(compressed), ctypes.byref(independent)))
+            len(compressed), ctypes.byref(independent)))
         if codec not in (3, 8, 9, 11, 12, 13):
             raise ExportError(f"Oodle returned unsupported stream codec: {codec}")
         return codec, bool(independent.value)
@@ -1222,7 +1221,7 @@ def build_outer_cdn_footer(compressed_prefix: bytes, decoded_length: int) -> byt
     if not compressed_prefix or decoded_length <= 0 or decoded_length > 0xFFFFFFFF:
         raise ExportError("Invalid outer CDN prefix or decoded length")
     without_crc = (compressed_prefix + struct.pack("<I", decoded_length)
-                   + CDN_OUTER_FOOTER_MARKER)
+        + CDN_OUTER_FOOTER_MARKER)
     return without_crc[-5:] + struct.pack("<I", crc32c(without_crc))
 
 def try_encode_outer_oodle(
@@ -1372,14 +1371,14 @@ def _duplicate_target_packages_not_updated(target_index, base_index, asset: Mani
         header = decompress_cache_entry(entry, oodle)
         if (len(header) >= 16 and header[:16] == asset.manifest_hash
                 and all(_piece_in_package(target_index, asset.namespace, asset.logical_path,
-                                          kind, entry.package) is not None for kind in required)):
+                kind, entry.package) is not None for kind in required)):
             matching_target_packages.add(entry.package)
     if len(matching_target_packages) < 2:
         return []
     missing = []
     for package in sorted(matching_target_packages, key=str.casefold):
         base_entries = [e for e in _entries_for(base_index, asset.namespace, asset.logical_path, "H")
-                        if e.package == package]
+            if e.package == package]
         if not base_entries:
             missing.append(package)
             continue
@@ -1703,7 +1702,7 @@ def export_patch(
     script_dir = Path(__file__).resolve().parent
     oodle = Oodle(script_dir)
 
-    print(f"Warframe Install-to-Patch {PRODUCT_VERSION}")
+    print(f"Warframe Install-to-Patch {VERSION}")
     print(f"Target install : {target_root}")
     print(f"Original base  : {base_root}")
     print(f"Output         : {output_root}")
@@ -1790,7 +1789,7 @@ def export_patch(
         b_records, available_manifests, required_manifest_families)
     if missing_required:
         raise ExportError('Required installed-configuration manifests unavailable: '
-                          + ', '.join(missing_required))
+            + ', '.join(missing_required))
     if required_manifest_families:
         print(f'[Manifest scope] {len(required_manifest_families)} explicitly required families '
               'verified; unavailable other configurations remain out of scope')
@@ -1915,7 +1914,7 @@ def export_patch(
         if unused_u4401:
             raise ExportError(f"{len(unused_u4401)} U44.0.1 exact assets are not valid target/base source gaps")
     planned_bytes = (sum(a.cdn_size for a in changed) + sum(a.cdn_size for a in recovered_imports)
-                     + sum(a.cdn_size for a in recovered_h_imports) + sum(a.cdn_size for a in u4401_imports))
+        + sum(a.cdn_size for a in recovered_h_imports) + sum(a.cdn_size for a in u4401_imports))
     print(
         f"[Compare] changed/new + proactive: {len(changed):,} | unchanged: {unchanged:,} | "
         f"inherited-from-base: {inherited_from_base:,} | source-unresolved: {source_missing:,} | "
@@ -1930,7 +1929,7 @@ def export_patch(
         installed_resolver = prepare(target_exe, target_index, oodle, required=require_static_types)
         if installed_resolver is not None:
             preflight_pinned_types(installed_resolver, target_index, oodle, manifest_assets,
-                                   required=require_static_types)
+                required=require_static_types)
     if dry_run:
         print("[Dry run] No output was written.")
         partial_source = bool(source_missing or missing_manifest_families)
@@ -2108,7 +2107,7 @@ def export_patch(
 
     if failure_collector is not None:
         for kind, count in (("unknown-base", unknown_base), ("base-inheritance", base_inheritance_errors),
-                            ("missing-source", source_missing)):
+                ("missing-source", source_missing)):
             if count:
                 failure_collector.append({"issue": kind, "count": count})
     if failures:
@@ -2145,7 +2144,7 @@ def _parse_manifest_type(value: str) -> int:
     return parsed
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
+    parser = StrictArgumentParser(
         description=(
             "Reconstruct an OpenWF/NCT-style Warframe update patch from an installed target "
             "Cache.Windows tree and the original unupdated Steam base."
@@ -2168,9 +2167,9 @@ def main(argv: list[str] | None = None) -> int:
         help="offline read-only H-only recovered CDN directory (two hash-locked U44 resources); revalidated and included in a NEW patch output",
     )
     parser.add_argument("--u4401-report", type=Path, metavar="JSON",
-                        help="explicit freshly generated exact U44.0.1 comparison report (clean-run mode)")
+        help="explicit freshly generated exact U44.0.1 comparison report (clean-run mode)")
     parser.add_argument("--u4401-patch", type=Path, metavar="DIR",
-                        help="read-only exact-identity U44.0.1 patch source; uses the project-local verified comparison report; no downloads")
+        help="read-only exact-identity U44.0.1 patch source; uses the project-local verified comparison report; no downloads")
     parser.add_argument(
         "--try-oodle-outer", dest="try_oodle_outer", action="store_true", default=True,
         help="backward-compatible alias; standalone verified outer-CDN encoding is enabled by default",
@@ -2224,12 +2223,12 @@ def main(argv: list[str] | None = None) -> int:
         help="with --audit-first, also decompress every required reference/base B/F piece (slow)",
     )
     parser.add_argument('--keep-failed-output', action='store_true',
-                        help='keep failed temporary patch with .install-to-patch.failed for debugging (default: safely delete it)')
+        help='keep failed temporary patch with .install-to-patch.failed for debugging (default: safely delete it)')
     parser.add_argument('--diagnostics-dir', type=Path, default=Path(__file__).resolve().parent,
-                        help='directory for timestamped export logs and result JSON (default: beside scripts)')
+        help='directory for timestamped export logs and result JSON (default: beside scripts)')
     parser.add_argument('--post-audit-report', type=Path,
-                        default=Path(__file__).resolve().parent / f'offline-patch-audit-postexport-v{VERSION}.json',
-                        help='deep post-export audit JSON path (default: beside scripts)')
+        default=Path(__file__).resolve().parent / f'offline-patch-audit-postexport-v{VERSION}.json',
+        help='deep post-export audit JSON path (default: beside scripts)')
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     args = parser.parse_args(argv)
 
@@ -2256,7 +2255,7 @@ def main(argv: list[str] | None = None) -> int:
         recovered_h_only_dir=args.recovered_h_only,
         u4401_patch=args.u4401_patch,
         u4401_report=args.u4401_report,
-                static_type_recovery=args.static_type_recovery,
+        static_type_recovery=args.static_type_recovery,
         require_static_types=args.require_static_types,
     )
 
@@ -2266,22 +2265,22 @@ def main(argv: list[str] | None = None) -> int:
         from offline_patch_audit import audit
         print('[Preflight] Read-only manifest and cache audit before export')
         check = audit(target=args.target, base=args.base,
-                      recovered_cdn=args.recovered_cdn,
-                      recovered_h_only=args.recovered_h_only,
-                      u4401_patch=args.u4401_patch,
-                      u4401_report=args.u4401_report,
-                                            deep_pieces=args.audit_deep_pieces,
-                      manifest_type=args.manifest_type,
-                      type_evidence_path=args.type_evidence,
-                      allow_cross_version_types=args.allow_cross_version_types,
-                      allow_bundled_types=args.allow_bundled_types,
-                      static_type_recovery=args.static_type_recovery,
-                      require_static_types=args.require_static_types,
-                      require_complete=args.require_complete,
-                      required_manifest_families=tuple(args.required_manifest_family))
+            recovered_cdn=args.recovered_cdn,
+            recovered_h_only=args.recovered_h_only,
+            u4401_patch=args.u4401_patch,
+            u4401_report=args.u4401_report,
+            deep_pieces=args.audit_deep_pieces,
+            manifest_type=args.manifest_type,
+            type_evidence_path=args.type_evidence,
+            allow_cross_version_types=args.allow_cross_version_types,
+            allow_bundled_types=args.allow_bundled_types,
+            static_type_recovery=args.static_type_recovery,
+            require_static_types=args.require_static_types,
+            require_complete=args.require_complete,
+            required_manifest_families=tuple(args.required_manifest_family))
         report_path = args.audit_report.resolve()
         for root in (args.target, args.base, args.recovered_cdn, args.recovered_h_only,
-                     args.u4401_patch, output):
+                args.u4401_patch, output):
             if root is not None and (report_path == root.resolve() or report_path.is_relative_to(root.resolve())):
                 raise ExportError('Preflight report must be outside installation, recovery, and output roots')
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2305,7 +2304,7 @@ def main(argv: list[str] | None = None) -> int:
             print('Interrupted.', file=sys.stderr)
             return 130
         except (ExportError, OSError) as exc:
-            print(f'ERROR: {exc}', file=sys.stderr)
+            print_error(exc)
             return 2
 
     from export_transaction import execute
@@ -2314,26 +2313,26 @@ def main(argv: list[str] | None = None) -> int:
     def verify_staged_patch(stage: Path) -> dict:
         print('[Post-export] Deep offline verification of temporary patch (before publication)')
         return audit(target=args.target, base=args.base, patch=stage,
-                     recovered_cdn=args.recovered_cdn,
-                     recovered_h_only=args.recovered_h_only,
-                     u4401_patch=args.u4401_patch,
-                     u4401_report=args.u4401_report,
-                                          deep_patch=True, manifest_type=args.manifest_type,
-                     type_evidence_path=args.type_evidence,
-                     allow_cross_version_types=args.allow_cross_version_types,
-                     allow_bundled_types=args.allow_bundled_types,
-                     static_type_recovery=args.static_type_recovery,
-                     require_static_types=args.require_static_types,
-                     require_complete=args.require_complete,
-                     required_manifest_families=tuple(args.required_manifest_family))
+            recovered_cdn=args.recovered_cdn,
+            recovered_h_only=args.recovered_h_only,
+            u4401_patch=args.u4401_patch,
+            u4401_report=args.u4401_report,
+            deep_patch=True, manifest_type=args.manifest_type,
+            type_evidence_path=args.type_evidence,
+            allow_cross_version_types=args.allow_cross_version_types,
+            allow_bundled_types=args.allow_bundled_types,
+            static_type_recovery=args.static_type_recovery,
+            require_static_types=args.require_static_types,
+            require_complete=args.require_complete,
+            required_manifest_families=tuple(args.required_manifest_family))
 
     try:
         return execute(
             final_output=output, diagnostics_dir=args.diagnostics_dir, version=VERSION,
             keep_failed_output=args.keep_failed_output,
             protected_sources=(args.target, args.base, args.recovered_cdn,
-                               args.recovered_h_only, args.u4401_patch,
-                               *(args.cdn_reference or [])),
+            args.recovered_h_only, args.u4401_patch,
+            *(args.cdn_reference or [])),
             post_audit_report=args.post_audit_report,
             preflight_report=args.audit_report if args.audit_first else None,
             preflight=preflight,
@@ -2343,7 +2342,7 @@ def main(argv: list[str] | None = None) -> int:
             verify=verify_staged_patch,
         )
     except (ExportError, OSError, RuntimeError) as exc:
-        print(f'ERROR: {exc}', file=sys.stderr)
+        print_error(exc)
         return 2
 
 if __name__ == "__main__":

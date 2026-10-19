@@ -28,28 +28,26 @@ from common import PlainLogTee as _Tee, error as print_error
 def _write_json(path: Path, doc: dict) -> None:
     # Do not leave a truncated result file after an interrupted write.
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile('w', dir=path.parent, prefix='.export-result-',
-                                     suffix='.tmp', encoding='utf-8', delete=False) as handle:
-        temporary = Path(handle.name)
-        try:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile('w', dir=path.parent, prefix='.export-result-',
+                suffix='.tmp', encoding='utf-8', delete=False) as handle:
+            temporary = Path(handle.name)
             json.dump(doc, handle, indent=2, ensure_ascii=False)
             handle.write('\n')
-        except BaseException:
-            temporary.unlink(missing_ok=True)
-            raise
-    try:
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 def execute(*, final_output: Path, diagnostics_dir: Path, version: str,
-            export: Callable[[Path, list[dict]], int],
-            verify: Callable[[Path], dict],
-            preflight: Callable[[], bool] | None = None,
-            keep_failed_output: bool = False,
-            protected_sources: tuple[Path | None, ...] = (),
-            post_audit_report: Path | None = None,
-            preflight_report: Path | None = None) -> int:
+        export: Callable[[Path, list[dict]], int],
+        verify: Callable[[Path], dict],
+        preflight: Callable[[], bool] | None = None,
+        keep_failed_output: bool = False,
+        protected_sources: tuple[Path | None, ...] = (),
+        post_audit_report: Path | None = None,
+        preflight_report: Path | None = None) -> int:
     """Run preflight/export/deep audit and publish only after verification.
 
     Callbacks may raise exceptions. The return status, log, failed objects, and
@@ -176,8 +174,8 @@ def execute(*, final_output: Path, diagnostics_dir: Path, version: str,
                         diagnostics_saved = True
                     except OSError as save_exc:
                         details['errors'].append({'phase': 'save-before-cleanup',
-                                                  'type': type(save_exc).__name__,
-                                                  'message': str(save_exc)})
+                            'type': type(save_exc).__name__,
+                            'message': str(save_exc)})
                         print_error(f'Failed saving diagnostics; temporary patch retained: {save_exc}')
                 if staged is not None:
                     if keep_failed_output or not diagnostics_saved:
@@ -189,7 +187,7 @@ def execute(*, final_output: Path, diagnostics_dir: Path, version: str,
                             else:
                                 marker.write_text('Failed transactional export; do not use.\n', encoding='utf-8')
                             details['cleanup'] = ('retained-by-request' if keep_failed_output
-                                                  else 'retained-diagnostics-write-failed')
+                                else 'retained-diagnostics-write-failed')
                             print(f'[Kept failed patch] {staged}')
                         except OSError as marker_exc:
                             details['cleanup'] = 'retained-marker-write-failed'

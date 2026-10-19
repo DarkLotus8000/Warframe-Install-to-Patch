@@ -34,7 +34,7 @@ def _is_redirect(path: Path) -> bool:
         return True
     try:
         return bool(getattr(path.lstat(), 'st_file_attributes', 0)
-                    & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0))
+            & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0))
     except FileNotFoundError:
         return False
 
@@ -56,7 +56,7 @@ def _require_regular_path(path: Path, root: Path) -> None:
         current = current.parent
 
 def _verify_asset_bytes(raw: bytes, asset: w.ManifestAsset, oodle: w.Oodle,
-                        expected_type: int) -> None:
+        expected_type: int) -> None:
     """Validate the same immutable buffer used for provenance and staging."""
     audit.verify_cdn_bytes(raw, asset, oodle)
     if (asset.namespace == '0' and asset.logical_path.lower().endswith('.bk2')
@@ -65,10 +65,10 @@ def _verify_asset_bytes(raw: bytes, asset: w.ManifestAsset, oodle: w.Oodle,
             _decoded_sections(raw, oodle, kinds='H')['H'])
         if embedded_hash != asset.manifest_hash or embedded_type != expected_type:
             raise StrippedError(f'Video CommonHeader hash/type disagrees with manifest: '
-                                f'{asset.namespace}{asset.logical_path}')
+                f'{asset.namespace}{asset.logical_path}')
 
 def _verify_asset(path: Path, asset: w.ManifestAsset, oodle: w.Oodle,
-                  expected_type: int) -> None:
+        expected_type: int) -> None:
     """On-disk verification; read the file only once."""
     _verify_asset_bytes(path.read_bytes(), asset, oodle, expected_type)
 
@@ -159,7 +159,7 @@ def _expected_type(asset: w.ManifestAsset, ti, bi, oodle, resolver) -> int:
     raise StrippedError(f'Unable to independently establish CDN type for {asset.namespace}{asset.logical_path}')
 
 def _existing_asset(root: Path, asset: w.ManifestAsset, oodle: w.Oodle, expected_type: int,
-                    *, verify: bool = True) -> Path | None:
+        *, verify: bool = True) -> Path | None:
     # Find exact hash only. A different current CDN hash is never considered.
     relative = w._safe_output_path(root, asset.namespace, asset.logical_path, 0, asset.hash_b64)
     parent = relative.parent
@@ -168,8 +168,8 @@ def _existing_asset(root: Path, asset: w.ManifestAsset, oodle: w.Oodle, expected
     if parent.is_symlink():
         raise StrippedError(f'Symlinked CDN directory: {parent}')
     matches = ([item for item in parent.iterdir() if
-                item.name.startswith(name + '!') and item.name.endswith('_' + asset.hash_b64)]
-               if parent.is_dir() else [])
+        item.name.startswith(name + '!') and item.name.endswith('_' + asset.hash_b64)]
+        if parent.is_dir() else [])
     if len(matches) > 1:
         raise StrippedError(f'Ambiguous CDN type for {asset.namespace}{asset.logical_path}')
     if not matches:
@@ -193,12 +193,12 @@ def _existing_asset(root: Path, asset: w.ManifestAsset, oodle: w.Oodle, expected
     return candidate
 
 def _download_exact(asset: w.ManifestAsset, type_id: int, oodle: w.Oodle,
-                    timeout: float, max_bytes: int, *, retries: int = 5,
-                    verify_func=None, attempts_log=None, before_attempt=None) -> bytes:
+        timeout: float, max_bytes: int, *, retries: int = 5,
+        verify_func=None, attempts_log=None, before_attempt=None) -> bytes:
     if not 0 < asset.cdn_size <= max_bytes:
         raise StrippedError(f'CDN fallback size exceeds per-object limit: {asset.namespace}{asset.logical_path}')
     item = dict(namespace=asset.namespace, logical_path=asset.logical_path,
-                expected_hash_base64=asset.hash_b64)
+        expected_hash_base64=asset.hash_b64)
     url = cdn.make_cdn_url(item, type_id)
     print(f'{color_label("CDN")} Exact manifest identity | {asset.namespace}{asset.logical_path} | {asset.cdn_size:,} bytes')
     raw, _checks = fetch_verified(
@@ -247,7 +247,7 @@ def _decoded_sections(raw: bytes, oodle: w.Oodle, *, kinds: str = 'HBF') -> dict
     return result
 
 def _crosscheck_installed_pieces(asset: w.ManifestAsset, raw: bytes, ti, bi,
-                                 oodle: w.Oodle) -> str:
+        oodle: w.Oodle) -> str:
     """Compare every surviving matching H/B/F package, even partial ones.
 
     An H hash is not a hash of video frames. The first matching H package may
@@ -283,29 +283,29 @@ def _crosscheck_installed_pieces(asset: w.ManifestAsset, raw: bytes, ti, bi,
         for h, h_data in matches:
             if chunks['H'] != h_data:
                 raise StrippedError(f'H bytes differ from original {label} cache: '
-                                    f'{asset.namespace}{asset.logical_path}')
+                    f'{asset.namespace}{asset.logical_path}')
             for kind in w._required_piece_kinds(asset.flags):
                 piece = w._piece_in_package(index, asset.namespace,
-                                            asset.logical_path, kind, h.package)
+                    asset.logical_path, kind, h.package)
                 if piece is None:
                     continue
                 if chunks[kind] != w.decompress_cache_entry(piece, oodle):
                     raise StrippedError(f'{kind} bytes differ from original {label} cache: '
-                                        f'{asset.namespace}{asset.logical_path}')
+                        f'{asset.namespace}{asset.logical_path}')
                 checked.add(kind)
         observed.update(checked)
         evidence.append(label + '-' + ''.join(c for c in 'HBF' if c in checked) + '-match')
     if evidence:
         missing = ''.join(c for c in w._required_piece_kinds(asset.flags) if c not in observed)
         return ('+'.join(evidence) + (f'; original-{missing}-not-independently-known'
-                                       if missing else ''))
+            if missing else ''))
     missing = w._required_piece_kinds(asset.flags)
     return ('manifest-H-identity-only; original-' + (missing or 'H') +
             '-not-independently-known')
 
 def _exact_source_object(asset: w.ManifestAsset, type_id: int,
-                         sources: list[tuple[Path, Path]], oodle: w.Oodle,
-                         ti, bi) -> tuple[bytes, Path, str] | None:
+        sources: list[tuple[Path, Path]], oodle: w.Oodle,
+        ti, bi) -> tuple[bytes, Path, str] | None:
     """Search ordered patches by namespace/path/type/H hash, never by name alone.
 
     Invalid exact-identity candidates fail closed. Newer same-path/different-hash
@@ -314,7 +314,7 @@ def _exact_source_object(asset: w.ManifestAsset, type_id: int,
     selected = None
     for source, content in sources:
         candidate = w._safe_output_path(content, asset.namespace, asset.logical_path,
-                                        type_id, asset.hash_b64)
+            type_id, asset.hash_b64)
         _require_regular_path(candidate, content)
         if candidate.is_symlink() or (candidate.exists() and not candidate.is_file()):
             raise StrippedError(f'Unsafe exact-identity source object: {candidate}')
@@ -340,12 +340,12 @@ def _exact_source_object(asset: w.ManifestAsset, type_id: int,
             # The older patch is preferred only when copies agree; never
             # silently pick arbitrary video bytes when sources conflict.
             raise StrippedError(f'Conflicting full CDN payloads under the same original manifest '
-                                f'identity: {asset.namespace}{asset.logical_path}; '
-                                f'{selected[1]} vs {source}')
+                f'identity: {asset.namespace}{asset.logical_path}; '
+                f'{selected[1]} vs {source}')
     return selected
 
 def _compare_video_source(asset: w.ManifestAsset, original: bytes, frames: bytes,
-                          source: Path, content: Path, oodle: w.Oodle) -> dict:
+        source: Path, content: Path, oodle: w.Oodle) -> dict:
     """Check any same-path source .bk2, even when its H identity changed.
 
     Unlike enrichment, this is *comparison*, not recovery. A source patch
@@ -354,7 +354,7 @@ def _compare_video_source(asset: w.ManifestAsset, original: bytes, frames: bytes
     """
     result = {'source_patch': str(source), 'status': 'not_present'}
     path = w._safe_output_path(content, asset.namespace, asset.logical_path,
-                               0xAA, asset.hash_b64)
+        0xAA, asset.hash_b64)
     parent = path.parent
     _require_regular_path(parent, content)
     if not parent.is_dir():
@@ -387,8 +387,8 @@ def _compare_video_source(asset: w.ManifestAsset, original: bytes, frames: bytes
             raise StrippedError('Source video exceeds safe object size limit')
         raw = candidate.read_bytes()
         from_source = w.ManifestAsset(asset.namespace, asset.section,
-                                      asset.logical_path, digest,
-                                      len(raw) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            asset.logical_path, digest,
+            len(raw) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         _verify_asset_bytes(raw, from_source, oodle, 0xAA)
         source_frames = _decoded_sections(raw, oodle, kinds='F')['F']
         if not source_frames:
@@ -396,19 +396,19 @@ def _compare_video_source(asset: w.ManifestAsset, original: bytes, frames: bytes
         same_f = frames == source_frames
         same_h = asset.manifest_hash == digest
         result.update(status='f_match' if same_f else 'f_different',
-                      source_manifest_hash=encoded,
-                      same_h_identity=same_h,
-                      same_full_cdn_bytes=(original == raw),
-                      cdn_size=len(raw),
-                      cdn_sha256=hashlib.sha256(raw).hexdigest(),
-                      f_bytes=len(source_frames),
-                      f_sha256=hashlib.sha256(source_frames).hexdigest())
+            source_manifest_hash=encoded,
+            same_h_identity=same_h,
+            same_full_cdn_bytes=(original == raw),
+            cdn_size=len(raw),
+            cdn_sha256=hashlib.sha256(raw).hexdigest(),
+            f_bytes=len(source_frames),
+            f_sha256=hashlib.sha256(source_frames).hexdigest())
     except (OSError, w.ExportError, ValueError, struct.error) as exc:
         result.update(status='invalid', error=f'{type(exc).__name__}: {exc}')
     return result
 
 def audit_existing_videos(*, patch: Path, target: Path, base: Path,
-                          source_patches: tuple[Path, ...] = ()) -> dict:
+        source_patches: tuple[Path, ...] = ()) -> dict:
     """Read-only U44.0.0 stripped .bk2 audit, including original F-byte checks.
 
     H/size/CRC validation alone cannot establish the historical F (video)
@@ -432,18 +432,18 @@ def audit_existing_videos(*, patch: Path, target: Path, base: Path,
     bi = w.scan_cache(w.find_cache_windows_dir(base))
     validate_patch_identity(patch, target, oodle, ti)
     videos = [asset for asset in installed_stripped(target, oodle, ti)
-              if asset.namespace == '0' and asset.logical_path.lower().endswith('.bk2')]
+        if asset.namespace == '0' and asset.logical_path.lower().endswith('.bk2')]
     if not videos:
         raise StrippedError('Original installed manifest declares no stripped .bk2 videos to audit')
     print(f'[Videos] {len(videos):,} original-manifest stripped .bk2 objects; read-only comparison')
     source_counts = {'f_match': 0, 'f_different': 0, 'not_present': 0,
-                     'invalid': 0, 'ambiguous': 0, 'same_h_different_f': 0}
+        'invalid': 0, 'ambiguous': 0, 'same_h_different_f': 0}
     results = []
     counts = {'target_f_verified': 0, 'base_only': 0, 'inconclusive': 0, 'failed': 0}
     content = patch / 'OpenWF' / 'Content'
     for number, asset in enumerate(videos, 1):
         record = {'namespace': asset.namespace, 'logical_path': asset.logical_path,
-                  'manifest_hash': asset.hash_b64, 'cdn_size': asset.cdn_size}
+            'manifest_hash': asset.hash_b64, 'cdn_size': asset.cdn_size}
         try:
             if asset.flags != (w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F):
                 raise StrippedError('Unexpected stripped .bk2 manifest piece flags')
@@ -457,20 +457,20 @@ def audit_existing_videos(*, patch: Path, target: Path, base: Path,
             if not frames:
                 raise StrippedError('Decoded video F section is empty')
             record.update(cdn_sha256=hashlib.sha256(raw).hexdigest(),
-                          f_sha256=hashlib.sha256(frames).hexdigest(), f_bytes=len(frames))
+                f_sha256=hashlib.sha256(frames).hexdigest(), f_bytes=len(frames))
             if sources:
                 comparisons = []
                 for source, source_content in sources:
                     comparison = _compare_video_source(asset, raw, frames,
-                                                      source, source_content, oodle)
+                        source, source_content, oodle)
                     comparisons.append(comparison)
                     source_counts[comparison['status']] += 1
                     if comparison['status'] == 'f_different' and comparison['same_h_identity']:
                         source_counts['same_h_different_f'] += 1
                     if comparison['status'] in ('invalid', 'ambiguous'):
                         print_warning(f'Source video comparison {comparison["status"]}: '
-                                      f'{source.name} | {asset.namespace}{asset.logical_path} | '
-                                      f'{comparison["error"]}')
+                            f'{source.name} | {asset.namespace}{asset.logical_path} | '
+                            f'{comparison["error"]}')
                     elif comparison['status'] == 'f_different':
                         print(f'[Compare] F differs | {source.name} | '
                               f'{asset.namespace}{asset.logical_path} | '
@@ -512,12 +512,12 @@ def audit_existing_videos(*, patch: Path, target: Path, base: Path,
             'full_cdn_bytes_proven': False}
 
 def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = False,
-                timeout: float = 30.0, max_cdn_bytes: int = 64 * 1024 * 1024,
-                max_total_cdn_bytes: int = 512 * 1024 * 1024,
-                full_source_hash: bool = False, retries: int = 5,
-                source_patches: tuple[Path, ...] = (),
-                attempt_history: list[dict] | None = None,
-                dry_run: bool = False) -> dict:
+        timeout: float = 30.0, max_cdn_bytes: int = 64 * 1024 * 1024,
+        max_total_cdn_bytes: int = 512 * 1024 * 1024,
+        full_source_hash: bool = False, retries: int = 5,
+        source_patches: tuple[Path, ...] = (),
+        attempt_history: list[dict] | None = None,
+        dry_run: bool = False) -> dict:
     """All-or-nothing additive enrichment, never overwrite an existing object.
 
     The only mutation of the supplied patch is new manifest-exact CDN files.
@@ -548,16 +548,16 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
     resolver = prepare(w._find_target_exe(target), ti, oodle, required=True)
     root = patch / 'OpenWF' / 'Content'
     typed_assets = [(asset, _expected_type(asset, ti, bi, oodle, resolver))
-                    for asset in assets]
+        for asset in assets]
     pending = [(asset, type_id) for asset, type_id in typed_assets
-               if _existing_asset(root, asset, oodle, type_id) is None]
+        if _existing_asset(root, asset, oodle, type_id) is None]
     print(f'[Stripped] {len(assets):,} declared; {len(assets)-len(pending):,} already verified; '
           f'{len(pending):,} exact objects to add')
     if not pending:
         return dict(total=len(assets), already=len(assets), added=0, would_add=0,
-                    dry_run=dry_run, local=0, source=0, source_bytes=0,
-                    cdn=0, cdn_bytes=0, unresolved=0, unresolved_assets=[],
-                    provenance=[])
+            dry_run=dry_run, local=0, source=0, source_bytes=0,
+            cdn=0, cdn_bytes=0, unresolved=0, unresolved_assets=[],
+            provenance=[])
     from installed_type_resolver import evidence_for_asset
     staging = Path(tempfile.mkdtemp(prefix='.wf-stripped-', dir=patch.parent))
     staged = []
@@ -580,8 +580,8 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
             for label, index in (('pristine', ti), ('base', bi)):
                 try:
                     selected = w._select_h_by_hash(index, asset.namespace, asset.logical_path,
-                                                   asset.manifest_hash, oodle,
-                                                   required_piece_kinds=w._required_piece_kinds(asset.flags))
+                        asset.manifest_hash, oodle,
+                        required_piece_kinds=w._required_piece_kinds(asset.flags))
                     source = (label, index, selected)
                     break
                 except w.SourceCoverageError:
@@ -616,7 +616,7 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
                     piece_check = 'original-cache'
                 except w.CdnSizeMismatchError:
                     print_warning(f'Local CDN encoding does not match U44 manifest size: '
-                                  f'{asset.namespace}{asset.logical_path}')
+                        f'{asset.namespace}{asset.logical_path}')
             # Prefer supplied older exact objects BEFORE contacting a live CDN.
             if raw is None:
                 match = _exact_source_object(asset, cdn_type, sources, oodle, ti, bi)
@@ -627,16 +627,16 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
                 if not allow_cdn:
                     if dry_run:
                         unresolved_assets.append({'namespace': asset.namespace,
-                                                  'logical_path': asset.logical_path,
-                                                  'manifest_hash': asset.hash_b64})
+                            'logical_path': asset.logical_path,
+                            'manifest_hash': asset.hash_b64})
                         print_warning(f'No exact offline source for '
-                                      f'{asset.namespace}{asset.logical_path}')
+                            f'{asset.namespace}{asset.logical_path}')
                         continue
                     raise StrippedError(f'No locally reconstructed or source-patch object for '
-                                        f'{asset.namespace}{asset.logical_path}; '
-                                        'use --cdn-fallback to try its exact U44.0.0 CDN URL')
+                        f'{asset.namespace}{asset.logical_path}; '
+                        'use --cdn-fallback to try its exact U44.0.0 CDN URL')
                 print_warning(f'No exact offline object for {asset.namespace}{asset.logical_path}; '
-                              'trying original-manifest CDN identity')
+                    'trying original-manifest CDN identity')
                 attempts: list[dict] = []
                 def validate_candidate(data: bytes):
                     w.atomic_write(scratch, data)
@@ -644,8 +644,8 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
                     return _crosscheck_installed_pieces(asset, data, ti, bi, oodle)
                 try:
                     raw = _download_exact(asset, cdn_type, oodle, timeout, max_cdn_bytes,
-                                          retries=retries, verify_func=validate_candidate,
-                                          attempts_log=attempts, before_attempt=reserve_attempt)
+                        retries=retries, verify_func=validate_candidate,
+                        attempts_log=attempts, before_attempt=reserve_attempt)
                 except StrippedError:
                     # Local safety-limit or authorization errors are not
                     # recoverable asset gaps, even in check-only mode.
@@ -654,15 +654,15 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
                     if not dry_run:
                         raise
                     unresolved_assets.append({'namespace': asset.namespace,
-                                              'logical_path': asset.logical_path,
-                                              'manifest_hash': asset.hash_b64,
-                                              'reason': f'{type(exc).__name__}: {exc}'})
+                        'logical_path': asset.logical_path,
+                        'manifest_hash': asset.hash_b64,
+                        'reason': f'{type(exc).__name__}: {exc}'})
                     print_warning(f'Exact CDN object could not be validated: '
-                                  f'{asset.namespace}{asset.logical_path} | {exc}')
+                        f'{asset.namespace}{asset.logical_path} | {exc}')
                     continue
                 finally:
                     cdn_attempts.append({'namespace': asset.namespace, 'logical_path': asset.logical_path,
-                                         'attempts': attempts})
+                        'attempts': attempts})
                 download_bytes += len(raw)
                 method = 'historical-cdn-exact-id'
                 piece_check = _crosscheck_installed_pieces(asset, raw, ti, bi, oodle)
@@ -672,9 +672,9 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
             if method == 'historical-cdn-exact-id':
                 print(f'{color_label("Verified")} Exact stripped CDN object | {asset.namespace}{asset.logical_path}')
             provenance.append({'namespace': asset.namespace, 'logical_path': asset.logical_path,
-                               'manifest_hash': asset.hash_b64, 'cdn_type': f'{cdn_type:X}',
-                               'sha256': hashlib.sha256(raw).hexdigest(),
-                               'method': method, 'piece_check': piece_check})
+                'manifest_hash': asset.hash_b64, 'cdn_type': f'{cdn_type:X}',
+                'sha256': hashlib.sha256(raw).hexdigest(),
+                'method': method, 'piece_check': piece_check})
             if method.startswith('local-'):
                 local += 1
             elif method.startswith('source-patch:'):
@@ -697,11 +697,11 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
             print(f'[Stripped] Check-only complete: {len(staged):,} verified, '
                   f'{len(unresolved_assets):,} unresolved; patch unchanged')
             return dict(total=len(assets), already=len(assets)-len(pending),
-                        added=0, would_add=len(staged), dry_run=True,
-                        local=local, source=reused, source_bytes=reused_bytes,
-                        cdn=downloaded, cdn_bytes=download_bytes, provenance=provenance,
-                        unresolved=len(unresolved_assets), unresolved_assets=unresolved_assets,
-                        cdn_reserved_bytes=reserved_bytes, cdn_attempts=cdn_attempts)
+                added=0, would_add=len(staged), dry_run=True,
+                local=local, source=reused, source_bytes=reused_bytes,
+                cdn=downloaded, cdn_bytes=download_bytes, provenance=provenance,
+                unresolved=len(unresolved_assets), unresolved_assets=unresolved_assets,
+                cdn_reserved_bytes=reserved_bytes, cdn_attempts=cdn_attempts)
         for src, dest, asset, cdn_type in staged:
             _require_regular_path(dest, root)
             if dest.exists() or dest.is_symlink() or not dest.resolve().is_relative_to(root.resolve()):
@@ -727,11 +727,11 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
             if hashlib.sha256(src.read_bytes()).digest() != hashlib.sha256(dest.read_bytes()).digest():
                 raise StrippedError(f'New CDN object changed during copy: {dest}')
         return dict(total=len(assets), already=len(assets)-len(pending),
-                    added=len(pending), would_add=len(pending), dry_run=False,
-                    local=local, source=reused, source_bytes=reused_bytes,
-                    cdn=downloaded, cdn_bytes=download_bytes, provenance=provenance,
-                    unresolved=0, unresolved_assets=[],
-                    cdn_reserved_bytes=reserved_bytes, cdn_attempts=cdn_attempts)
+            added=len(pending), would_add=len(pending), dry_run=False,
+            local=local, source=reused, source_bytes=reused_bytes,
+            cdn=downloaded, cdn_bytes=download_bytes, provenance=provenance,
+            unresolved=0, unresolved_assets=[],
+            cdn_reserved_bytes=reserved_bytes, cdn_attempts=cdn_attempts)
     except BaseException:
         for path in reversed(added):
             path.unlink(missing_ok=True)

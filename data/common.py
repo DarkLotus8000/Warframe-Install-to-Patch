@@ -5,8 +5,6 @@ fetch_verified is deliberately lazy to prevent circular imports.
 """
 from __future__ import annotations
 
-PRODUCT_VERSION = 'v0.1'
-
 import argparse
 import ctypes
 from datetime import datetime, timezone
@@ -18,6 +16,8 @@ import re
 import sys
 import time
 from urllib.error import HTTPError, URLError
+
+VERSION = "0.1"
 
 class StrictArgumentParser(argparse.ArgumentParser):
     """Reject ambiguous abbreviations, stacked short flags, and duplicate options.
@@ -140,7 +140,6 @@ class PlainLogTee:
         return getattr(self.streams[0], name)
 
 # ---- Source fingerprints ----
-VERSION = PRODUCT_VERSION.removeprefix('v')
 
 SELECTED = {'Font', 'ShaderDx11', 'ShaderPermutationDx11', 'Misc'}
 
@@ -167,9 +166,9 @@ def snapshot(root: Path, *, all_cache: bool = False) -> dict:
         rel = path.relative_to(cache).as_posix()
         stat = path.stat()
         should_hash = (path.suffix.lower() == '.toc' or all_cache or
-                       any(f'.{package}.cache' in path.name for package in SELECTED))
+            any(f'.{package}.cache' in path.name for package in SELECTED))
         records[rel] = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
-                        'sha256': sha256(path) if should_hash else None}
+            'sha256': sha256(path) if should_hash else None}
     if not records or not any(k.lower().endswith('.toc') for k in records):
         raise ValueError(f'No cache TOCs found: {cache}')
     return {'kind': 'warframe-cache-fingerprint', 'version': VERSION,
@@ -183,8 +182,8 @@ def compare(before: dict, after: dict) -> dict:
     b, a = before['files'], after['files']
     changes = []
     stats = {'files_before': len(b), 'files_after': len(a),
-             'added': 0, 'removed': 0, 'content_changed': 0,
-             'stat_changed_unhashed': 0, 'timestamp_only': 0, 'unchanged': 0}
+        'added': 0, 'removed': 0, 'content_changed': 0,
+        'stat_changed_unhashed': 0, 'timestamp_only': 0, 'unchanged': 0}
     for name in sorted(b.keys() | a.keys()):
         first, second = b.get(name), a.get(name)
         if first is None:
@@ -212,7 +211,7 @@ def compare(before: dict, after: dict) -> dict:
             'before_cache': before.get('cache'), 'after_cache': after.get('cache'),
             'counts': stats, 'changes': changes,
             'limitations': ('Cache contents not SHA-256 hashed on both sides cannot be proved unchanged by this comparison. '
-                            'This covers Cache.Windows only, not OpenWF-specific user data elsewhere.')}
+        'This covers Cache.Windows only, not OpenWF-specific user data elsewhere.')}
 
 def safe_json_write(path: Path, data: dict, sources: tuple[Path, ...]) -> None:
     dest = path.resolve(strict=False)
@@ -230,9 +229,9 @@ def safe_json_write(path: Path, data: dict, sources: tuple[Path, ...]) -> None:
 RETRYABLE_HTTP = {408, 425, 429}
 
 def fetch_verified(*, url: str, logical_path: str, expected_size: int,
-                   timeout: float, get_func, verify_func, retries: int = 5,
-                   attempts_log: list[dict] | None = None, before_attempt=None,
-                   sleeper=None):
+        timeout: float, get_func, verify_func, retries: int = 5,
+        attempts_log: list[dict] | None = None, before_attempt=None,
+        sleeper=None):
     """Return (bytes, verifier_result); no failed payload is accepted.
 
     get_func(url, expected_size, timeout) must enforce Content-Length and the
@@ -261,7 +260,7 @@ def fetch_verified(*, url: str, logical_path: str, expected_size: int,
             phase = 'verify'
             checks = verify_func(data)
             history.append({'attempt': attempt, 'status': 'verified', 'http_status': 200,
-                            'bytes': len(data)})
+                'bytes': len(data)})
             http_line('GET', 200, logical_path, f'attempt {attempt}/{retries}; verified {len(data):,} bytes')
             return data, checks
         except HTTPError as exc:
@@ -271,13 +270,13 @@ def fetch_verified(*, url: str, logical_path: str, expected_size: int,
             reason = f'HTTP {code}: {exc.reason}'
             http_line('GET', code, logical_path, f'attempt {attempt}/{retries}; request rejected: {exc.reason}')
             entry = {'attempt': attempt, 'status': 'http-failed', 'http_status': code,
-                     'retryable': retryable, 'reason': reason[:240]}
+                'retryable': retryable, 'reason': reason[:240]}
         except (URLError, TimeoutError, ConnectionError, OSError) as exc:
             failure = exc
             retryable = True
             reason = f'{type(exc).__name__}: {exc}'
             entry = {'attempt': attempt, 'status': 'network-failed', 'http_status': None,
-                     'retryable': True, 'reason': reason[:240]}
+                'retryable': True, 'reason': reason[:240]}
         except (w.ExportError, ValueError) as exc:
             failure = exc
             # The downloader enforces exact byte size and encoding and raises
@@ -287,8 +286,8 @@ def fetch_verified(*, url: str, logical_path: str, expected_size: int,
             retryable = getattr(exc, 'retryable', True)
             reason = f'{type(exc).__name__}: {exc}'
             entry = {'attempt': attempt, 'status': 'integrity-failed' if phase == 'verify' else 'response-invalid',
-                     'http_status': 200 if phase == 'verify' else None,
-                     'retryable': retryable, 'reason': reason[:600]}
+                'http_status': 200 if phase == 'verify' else None,
+                'retryable': retryable, 'reason': reason[:600]}
         history.append(entry)
         if not retryable or attempt == retries:
             assert failure is not None

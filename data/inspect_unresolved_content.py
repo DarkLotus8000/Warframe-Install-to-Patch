@@ -8,6 +8,8 @@ of CURRENT HTTP availability only, not historical existence or usability.
 """
 from __future__ import annotations
 
+from common import StrictArgumentParser
+
 import argparse
 from collections import Counter
 from datetime import datetime, timezone
@@ -135,8 +137,8 @@ def infer_video_type(target_root: Path, *, max_samples: int = 40) -> dict:
         except (w.ExportError, OSError, ValueError):
             continue
     result = {'candidate_types': {f'{key:X}': count for key, count in sorted(guesses.items())},
-              'samples': samples[:8], 'sampled_headers': len(samples), 'type_hex': None,
-              'type_confidence': 'not-established'}
+        'samples': samples[:8], 'sampled_headers': len(samples), 'type_hex': None,
+        'type_confidence': 'not-established'}
     if len(guesses) == 1 and sum(guesses.values()) >= 2:
         result['type_hex'] = f'{next(iter(guesses)):X}'
         result['type_confidence'] = 'same-extension-cache-peers-not-per-file-proof'
@@ -171,7 +173,7 @@ def _head(url: str, *, timeout: float) -> dict:
         return {'http_status': None, 'error': str(exc)[:256]}
 
 def probe_cdn(report: dict, *, video_type: int | None, target: Path | None,
-              limit: int, timeout: float, head_func=_head) -> None:
+        limit: int, timeout: float, head_func=_head) -> None:
     if video_type is None:
         if target is None:
             raise w.ExportError('--probe-cdn needs --target to infer the video type, or --video-type HEX')
@@ -184,7 +186,7 @@ def probe_cdn(report: dict, *, video_type: int | None, target: Path | None,
     video_items = [x for x in report['objects'] if x['category'] in ('video-preview', 'other-video')]
     # Representative coverage across entire list, not just first alphabetic names.
     selected = ([video_items[(i * len(video_items)) // min(limit, len(video_items))]
-                 for i in range(min(limit, len(video_items)))] if video_items else [])
+        for i in range(min(limit, len(video_items)))] if video_items else [])
     if video_type is None:
         for item in selected:
             item['cdn_probe'] = {'status': 'not-checked-type-unresolved'}
@@ -204,7 +206,7 @@ def probe_cdn(report: dict, *, video_type: int | None, target: Path | None,
         else:
             status = 'network-error-inconclusive'
         item['cdn_probe'] = {'status': status, 'url': url,
-                             'http_status': code, 'content_length': size}
+            'http_status': code, 'content_length': size}
         if head_result.get('error'):
             item['cdn_probe']['error'] = head_result['error']
         report['summary']['cdn_head_requests'] += 1
@@ -220,7 +222,7 @@ def _int_hex(text: str) -> int:
     return n
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = StrictArgumentParser(description=__doc__)
     parser.add_argument('missing_report', type=Path)
     parser.add_argument('base_report', type=Path)
     parser.add_argument('-o', '--output', type=Path, default=Path('unresolved-content-v0.1.json'))
@@ -253,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         result = summarize(unresolved, a, b)
         if args.probe_cdn and args.max_probes:
             probe_cdn(result, video_type=args.video_type, target=target_root,
-                      limit=args.max_probes, timeout=args.timeout)
+                limit=args.max_probes, timeout=args.timeout)
         print(f"[Triage] Inherited: {result['summary']['verified_in_base']} | still unresolved: {len(unresolved)}")
         for kind, count in result['summary']['unresolved_by_category'].items():
             print(f'[Group] {kind}: {count}')

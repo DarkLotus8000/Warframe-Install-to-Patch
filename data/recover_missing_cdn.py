@@ -11,7 +11,8 @@ new archival fingerprint; it is NOT compared with an original CDN SHA-256.
 """
 from __future__ import annotations
 
-import argparse
+from common import StrictArgumentParser
+
 import base64
 from datetime import datetime, timezone
 import hashlib
@@ -194,7 +195,7 @@ def run(report: dict, destination: Path, *, limit: int, timeout: float,
         name = row['logical_path']
         url = triage.make_cdn_url(row, 0xAA)
         result = {'namespace': row['namespace'], 'logical_path': name, 'url': url,
-                  'expected_cdn_size_bytes': row['expected_cdn_size_bytes']}
+            'expected_cdn_size_bytes': row['expected_cdn_size_bytes']}
         try:
             data = get_func(url, row['expected_cdn_size_bytes'], timeout)
             checks = validate_cdn_payload(data, row, oodle)
@@ -218,8 +219,8 @@ def run(report: dict, destination: Path, *, limit: int, timeout: float,
         'source': 'opt-in GET from exact CDN URLs in HEAD report',
         'notice': 'SHA-256 is newly calculated; the U44 manifest identifies the H header, not the SHA-256 of full CDN bytes.',
         'summary': {'selected': len(outcomes),
-                    'recovered_validated': sum(x['status'] == 'recovered-validated' for x in outcomes),
-                    'failed': sum(x['status'] != 'recovered-validated' for x in outcomes)},
+        'recovered_validated': sum(x['status'] == 'recovered-validated' for x in outcomes),
+        'failed': sum(x['status'] != 'recovered-validated' for x in outcomes)},
         'objects': outcomes,
     }
     with (destination / 'cdn-recovery-v0.1.json').open('x', encoding='utf-8') as file:
@@ -228,7 +229,7 @@ def run(report: dict, destination: Path, *, limit: int, timeout: float,
     return result_report
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = StrictArgumentParser(description=__doc__)
     parser.add_argument('cdn_report', type=Path, help='unresolved-cdn-all-v0.1.json')
     parser.add_argument('-o', '--output-dir', type=Path, help='new, nonexistent destination folder outside installations')
     parser.add_argument('--download', action='store_true', help='explicitly opt in to CDN GET requests')

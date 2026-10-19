@@ -27,29 +27,29 @@ class TestCliAliases(unittest.TestCase):
 
     def test_add_stripped_short_aliases_match_long_options(self):
         short = ['-p', 'existing', '-t', 'target', '-b', 'base', '-s', 'older',
-                 '-c', '-n', '-r', '3', '-f', '-l', 'logs']
+            '-c', '-n', '-r', '3', '-f', '-l', 'logs']
         long = ['--patch', 'existing', '--target', 'target', '--base', 'base',
                 '--source-patch', 'older', '--cdn-fallback', '--dry-run',
                 '--retries', '3', '--full-source-hash', '--logs-dir', 'logs']
         self.assertEqual(self.parse(add_stripped.parser, short),
-                         self.parse(add_stripped.parser, long))
+            self.parse(add_stripped.parser, long))
 
     def test_install_short_aliases_match_long_options(self):
         short = ['-t', 'target', '-b', 'base', '-u', 'older', '-P', 'parent',
-                 '-w', 'workspace', '-l', 'logs', '-r', '3', '-T', '12', '-f',
-                 '-a', '-c', '-e', '-k']
+            '-w', 'workspace', '-l', 'logs', '-r', '3', '-T', '12', '-f',
+            '-a', '-c', '-e', '-k']
         long = ['--target', 'target', '--base', 'base', '--u4401', 'older',
                 '--output-parent', 'parent', '--work-parent', 'workspace',
                 '--logs-dir', 'logs', '--cdn-retries', '3', '--cdn-timeout', '12',
                 '--full-source-hash', '--all-stripped', '--stripped-cdn-fallback',
                 '--keep-failed-output', '--keep-workspace']
         self.assertEqual(self.parse(install_to_patch.parser, short),
-                         self.parse(install_to_patch.parser, long))
+            self.parse(install_to_patch.parser, long))
         self.assertEqual(self.parse(install_to_patch.parser, ['-t', 'target', '-b', 'base', '-u', 'older', '-o', 'out'])['output'], Path('out'))
 
     def test_repeated_source_patch_is_intentional(self):
         opts = self.parse(add_stripped.parser,
-                          ['-p', 'existing', '-t', 'target', '-b', 'base', '-s', 'first', '--source-patch', 'second', '-n'])
+            ['-p', 'existing', '-t', 'target', '-b', 'base', '-s', 'first', '--source-patch', 'second', '-n'])
         self.assertEqual(opts['source_patch'], [Path('first'), Path('second')])
         self.assertTrue(opts['dry_run'])
 
@@ -66,7 +66,7 @@ class TestCliAliases(unittest.TestCase):
 
     def test_reject_stacked_short_options_and_attached_values(self):
         for args in (['-p', 'existing', '-cn'], ['-p', 'existing', '-pother'],
-                     ['-p=existing'], ['-p', 'existing', '-r3']):
+                ['-p=existing'], ['-p', 'existing', '-r3']):
             with self.subTest(args=args):
                 self.assert_rejected(add_stripped.parser, args)
         self.assert_rejected(install_to_patch.parser, ['-ac'])
@@ -127,18 +127,32 @@ class TestReleaseMetadata(unittest.TestCase):
         import recover_remaining_h_only
         import recover_u4400_last_three
 
-        self.assertEqual(common.PRODUCT_VERSION, 'v0.1')
+        self.assertEqual(common.VERSION, "0.1")
         for version in (common.VERSION, exporter.VERSION,
-                        recover_missing_cdn.RECOVERY_REPORT_FORMAT,
-                        recover_remaining_h_only.VERSION,
-                        recover_u4400_last_three.VERSION):
+                recover_missing_cdn.RECOVERY_REPORT_FORMAT,
+                recover_remaining_h_only.VERSION,
+                recover_u4400_last_three.VERSION):
             self.assertEqual(version, '0.1')
         self.assertEqual(recover_remaining_h_only.REPORT_NAME,
-                         'cdn-h-only-recovery-v0.1.json')
+            'cdn-h-only-recovery-v0.1.json')
+
+    def test_version_uses_nct_convention(self):
+        import common
+
+        source = (ROOT / 'data/common.py').read_text(encoding='utf-8')
+        self.assertIn('VERSION = "0.1"', source)
+        self.assertNotIn('PRODUCT_' + 'VERSION', source)
+        for factory in (install_to_patch.parser, add_stripped.parser):
+            with self.subTest(factory=factory):
+                with contextlib.redirect_stdout(io.StringIO()) as stream:
+                    with self.assertRaises(SystemExit) as raised:
+                        factory().parse_args(['--version'])
+                self.assertEqual(raised.exception.code, 0)
+                self.assertEqual(stream.getvalue().strip(), f'Warframe Install-to-Patch {common.VERSION}')
 
     def test_no_obsolete_development_release_labels(self):
         for path in (*ROOT.glob('*.py'), *(ROOT / 'data').glob('*.py'), ROOT / 'README.md',
-                     ROOT / 'Warframe-Install-to-Patch-Internals.md'):
+                ROOT / 'Warframe-Install-to-Patch-Internals.md'):
             with self.subTest(file=path.relative_to(ROOT)):
                 text = path.read_text(encoding='utf-8')
                 self.assertNotIn('v0.2.', text)
@@ -153,7 +167,7 @@ class TestReleaseMetadata(unittest.TestCase):
         blob = b'blob ' + str(len(payload)).encode('ascii') + b'\0' + payload
         # Blob hash of DarkLotus8000/Ninja-Capture-Tool main/LICENSE.
         self.assertEqual(hashlib.sha1(blob).hexdigest(),
-                         'f288702d2fa16d3cdf0035b15a9fcbc552cd88e7')
+            'f288702d2fa16d3cdf0035b15a9fcbc552cd88e7')
 
 class TestNctCliErrors(unittest.TestCase):
     def test_missing_arguments_use_error_label(self):
@@ -298,7 +312,7 @@ class TestHCacheRetryPolicy(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(rebuild.HCacheVerificationError):
                 rebuild.fetch_original_h_cache(self.LABEL, timeout=5, retries=3,
-                                               opener=o, sleeper=lambda delay: None, verify_func=verify)
+                    opener=o, sleeper=lambda delay: None, verify_func=verify)
         self.assertEqual(o.calls, 3)
 
     def test_invalid_retry_count_rejected(self):
@@ -314,8 +328,8 @@ class TestSourceFormatting(unittest.TestCase):
     def test_no_redundant_source_whitespace(self):
         import re
         source_files = [p for p in ROOT.rglob('*') if p.is_file() and
-                        p.suffix in ('.py', '.md', '.txt') and
-                        '__pycache__' not in p.parts]
+            p.suffix in ('.py', '.md', '.txt') and
+            '__pycache__' not in p.parts]
         for path in source_files:
             with self.subTest(file=path.relative_to(ROOT)):
                 lines = path.read_text(encoding='utf-8').splitlines()
@@ -323,9 +337,114 @@ class TestSourceFormatting(unittest.TestCase):
                     self.assertEqual(line, line.rstrip(' \t'), f'{path}:{number}: trailing whitespace')
                     self.assertNotIn('\t', line, f'{path}:{number}: tab')
                     self.assertFalse(line.lstrip().startswith('#  '),
-                                     f'{path}:{number}: redundant comment spacing')
+                        f'{path}:{number}: redundant comment spacing')
                     self.assertIsNone(re.search(r'(?<=[.!?]) {2,}(?=\S)', line),
-                                      f'{path}:{number}: repeated spaces after punctuation')
+                        f'{path}:{number}: repeated spaces after punctuation')
                     if number > 1:
                         self.assertFalse(not line.strip() and not lines[number - 2].strip(),
-                                         f'{path}:{number}: consecutive blank lines')
+                            f'{path}:{number}: consecutive blank lines')
+
+    def test_continuation_indent_is_not_column_aligned(self):
+        import tokenize
+
+        for path in ROOT.rglob('*.py'):
+            if '__pycache__' in path.parts:
+                continue
+            lines = path.read_text(encoding='utf-8').splitlines()
+            tokens = tokenize.generate_tokens(io.StringIO('\n'.join(lines) + '\n').readline)
+            multiline_strings = set()
+            start = None
+            for token in tokens:
+                if token.type == tokenize.STRING and token.end[0] > token.start[0]:
+                    multiline_strings.update(range(token.start[0], token.end[0] + 1))
+                if start is None and token.type not in (
+                    tokenize.INDENT, tokenize.DEDENT, tokenize.NL,
+                    tokenize.COMMENT, tokenize.ENDMARKER, tokenize.NEWLINE
+                ):
+                    start = token.start[0]
+                if token.type == tokenize.NEWLINE and start is not None:
+                    base = len(lines[start - 1]) - len(lines[start - 1].lstrip(' '))
+                    for number in range(start + 1, token.start[0] + 1):
+                        if number in multiline_strings:
+                            continue
+                        line = lines[number - 1]
+                        if not line.strip() or line.lstrip().startswith('#'):
+                            continue
+                        indent = len(line) - len(line.lstrip(' '))
+                        self.assertLessEqual(indent, base + 8,
+                            f'{path}:{number}: excessive continuation indentation')
+                    start = None
+
+class TestInternalCliErrors(unittest.TestCase):
+    SCRIPTS = (
+        'compare_u4401_sources.py',
+        'inspect_missing_source.py',
+        'inspect_unresolved_content.py',
+        'offline_patch_audit.py',
+        'rebuild_pristine_u4400.py',
+        'recover_missing_cdn.py',
+        'recover_remaining_h_only.py',
+        'recover_u4400_last_three.py',
+        'restore_u44_complete.py',
+        'warframe_install_to_patch.py',
+    )
+
+    def test_every_internal_cli_formats_invalid_arguments_consistently(self):
+        import subprocess
+        for script in self.SCRIPTS:
+            with self.subTest(script=script):
+                cmd = [sys.executable, str(ROOT / 'data' / script), '--unknown-option']
+                result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('ERROR:', result.stderr)
+                self.assertNotIn('error: ', result.stderr)
+                self.assertNotIn('Traceback', result.stderr)
+
+    def test_repeated_internal_manifest_family_is_still_supported(self):
+        import common
+        parser = common.StrictArgumentParser(repeatable_destinations={'required_manifest_family'})
+        parser.add_argument('--required-manifest-family', action='append')
+        result = parser.parse_args(['--required-manifest-family', 'a', '--required-manifest-family', 'b'])
+        self.assertEqual(result.required_manifest_family, ['a', 'b'])
+
+    def test_common_red_error_prefix(self):
+        import common
+        with mock.patch.object(common, '_enabled', return_value=True):
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                with self.assertRaises(SystemExit) as raised:
+                    common.StrictArgumentParser().parse_args(['--invalid'])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn('\x1b[31mERROR:\x1b[0m', stderr.getvalue())
+
+class TestAtomicReportCleanup(unittest.TestCase):
+    def test_temporary_file_is_closed_before_cleanup(self):
+        import export_transaction
+
+        original_open = tempfile.NamedTemporaryFile
+        original_unlink = Path.unlink
+        for writer, prefix in (
+                (install_to_patch._save_json_atomic, '.wf-log-'),
+                (export_transaction._write_json, '.export-result-')):
+            with self.subTest(writer=writer.__name__), tempfile.TemporaryDirectory() as folder:
+                handles = []
+
+                def record_open(*args, **kwargs):
+                    handle = original_open(*args, **kwargs)
+                    handles.append(handle)
+                    return handle
+
+                def checked_unlink(path, *args, **kwargs):
+                    if path.name.startswith(prefix):
+                        self.assertTrue(handles[-1].closed)
+                    return original_unlink(path, *args, **kwargs)
+
+                destination = Path(folder) / 'result.json'
+                with mock.patch.object(tempfile, 'NamedTemporaryFile', side_effect=record_open), \
+                        mock.patch.object(Path, 'unlink', autospec=True, side_effect=checked_unlink):
+                    with self.assertRaises(TypeError):
+                        writer(destination, {'bad': object()})
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(Path(folder).glob('*.tmp')), [])
+                writer(destination, {'success': True})
+                self.assertEqual(destination.read_text(encoding='utf-8'), '{\n  "success": true\n}\n')
+                self.assertEqual(list(Path(folder).glob('*.tmp')), [])

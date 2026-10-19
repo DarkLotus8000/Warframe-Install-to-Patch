@@ -9,10 +9,9 @@ checked against the project-local missing-source/base/U44.0.1 reports.
 """
 from __future__ import annotations
 
-from common import http_line, label as color_label, error as print_error
+from common import StrictArgumentParser, http_line, label as color_label, error as print_error
 from common import fetch_verified
 
-import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -99,8 +98,8 @@ def _safe_object_path(project: Path, row: dict) -> Path:
     name = row['logical_path']
     type_id = PINNED[name][2]
     location = w._safe_output_path(root / ('recovered-videos' if type_id == 0xAA else 'recovered-h-only')
-                                   / 'OpenWF' / 'Content', '0', name,
-                                   type_id, row['expected_hash_base64'])
+        / 'OpenWF' / 'Content', '0', name,
+        type_id, row['expected_hash_base64'])
     if project.is_symlink() or not project.is_dir() or not location.resolve().is_relative_to(project.resolve()):
         raise w.ExportError('Recovery path escapes project directory')
     # Check every existing component, not only the final file.
@@ -135,7 +134,7 @@ def _existing_checksum(project: Path, row: dict) -> str | None:
 def _store_collection_reports(project: Path, rows: list[dict], successes: dict) -> None:
     root = project / RECOVERY_DIR
     for type_id, directory, filename in ((0xAA, 'recovered-videos', 'cdn-recovery-v0.1.json'),
-                                          (0xD2, 'recovered-h-only', honly.REPORT_NAME)):
+            (0xD2, 'recovered-h-only', honly.REPORT_NAME)):
         selected = []
         for row in rows:
             name = row['logical_path']
@@ -144,7 +143,7 @@ def _store_collection_reports(project: Path, rows: list[dict], successes: dict) 
             item = {k: row[k] for k in ('namespace', 'logical_path', 'expected_cdn_size_bytes')}
             if type_id == 0xD2:
                 item.update(expected_hash_base64=row['expected_hash_base64'], manifest_flags=row['manifest_flags'],
-                            cdn_type_hex='D2')
+                    cdn_type_hex='D2')
             item.update(status='recovered-validated', url=triage.make_cdn_url(row, type_id), **successes[name])
             item['relative_path'] = _safe_object_path(project, row).relative_to(root / directory).as_posix()
             selected.append(item)
@@ -196,8 +195,8 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
         url = triage.make_cdn_url(row, type_id)  # Never accept URLs from local reports.
         dest = _safe_object_path(project, row)
         result = {'namespace': '0', 'logical_path': name, 'url': url,
-                  'expected_bytes': row['expected_cdn_size_bytes'], 'cdn_type_hex': f'{type_id:X}',
-                  'download_attempts': []}
+            'expected_bytes': row['expected_cdn_size_bytes'], 'cdn_type_hex': f'{type_id:X}',
+            'download_attempts': []}
         try:
             if dest.is_file():
                 raw = dest.read_bytes()
@@ -206,7 +205,7 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
                 checks = _validate_payload(raw, row, oodle)
                 prior_sha = _existing_checksum(project, row)
                 if prior_sha is not None and (not isinstance(prior_sha, str)
-                                              or prior_sha.lower() != checks['sha256'].lower()):
+                        or prior_sha.lower() != checks['sha256'].lower()):
                     raise w.ExportError('Existing recovery bytes differ from recorded SHA-256')
                 result.update(status='already-verified-locally', **checks)
                 successes[name] = checks
@@ -247,14 +246,14 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
     if download:
         _store_collection_reports(project, rows, successes)
     report = {'version': VERSION, 'kind': 'u4400-historical-last-three-recovery' if download else 'u4400-historical-last-three-probe',
-              'created_utc': _timestamp(),
-              'notice': 'A manifest H digest and SHCC CRC32C do not independently authenticate historical F bytes.',
-              'network': 'HEAD+explicit-GET' if download else 'HEAD-only',
-              'summary': {'required': 3, 'available_locally': len(successes),
-                          'head_confirmed_only': sum(r['status'] == 'head-confirmed-payload-not-verified' for r in outcomes),
-                          'unavailable_or_failed': sum(r['status'] in {'unavailable-or-unconfirmed', 'failed'} for r in outcomes),
-                          'fully_verified': len(successes)},
-              'objects': outcomes}
+        'created_utc': _timestamp(),
+        'notice': 'A manifest H digest and SHCC CRC32C do not independently authenticate historical F bytes.',
+        'network': 'HEAD+explicit-GET' if download else 'HEAD-only',
+        'summary': {'required': 3, 'available_locally': len(successes),
+        'head_confirmed_only': sum(r['status'] == 'head-confirmed-payload-not-verified' for r in outcomes),
+        'unavailable_or_failed': sum(r['status'] in {'unavailable-or-unconfirmed', 'failed'} for r in outcomes),
+        'fully_verified': len(successes)},
+        'objects': outcomes}
     output = project / (RECOVERY_REPORT if download else PROBE_REPORT)
     if output.is_symlink():
         raise w.ExportError('Report path is symlinked')
@@ -263,7 +262,7 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
     return report
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = StrictArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument('--probe', action='store_true', help='opt in to HEAD requests for the three exact historical URLs')
     action.add_argument('--download', action='store_true', help='opt in to HEAD+GET for only the three exact historical URLs')
@@ -277,14 +276,14 @@ def main(argv: list[str] | None = None) -> int:
         if not all((args.target, args.base, args.u4401_patch)):
             raise w.ExportError('Clean-start recovery requires --target, --base and --u4401-patch')
         report = run(PROJECT, download=args.download, timeout=args.timeout,
-                     fresh_sources=(args.target, args.base, args.u4401_patch), retries=args.retries)
+            fresh_sources=(args.target, args.base, args.u4401_patch), retries=args.retries)
         return 0 if report['summary']['fully_verified'] == 3 or (
             args.probe and report['summary']['head_confirmed_only'] + report['summary']['available_locally'] == 3) else 2
     except KeyboardInterrupt:
         print('\nInterrupted; prior verified files remain on disk.', file=sys.stderr)
         return 130
     except (OSError, ValueError, w.ExportError) as exc:
-        print(f'ERROR: {exc}', file=sys.stderr)
+        print_error(exc)
         return 2
 
 if __name__ == '__main__':

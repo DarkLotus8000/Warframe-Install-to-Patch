@@ -8,9 +8,8 @@ objects are retained for safe retries. No remote requests without --download.
 """
 from __future__ import annotations
 
-from common import error as print_error, warning as print_warning
+from common import StrictArgumentParser, error as print_error, warning as print_warning
 
-import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -25,7 +24,7 @@ import recover_remaining_h_only as honly
 import warframe_install_to_patch as w
 
 REQUIRED_FAMILIES = ('/B.Cache.Windows.bin', '/B.Cache.Windows_en.bin',
-                     '/B.Cache.Windows_xx.bin', '/B.Cache.Dx11.bin')
+    '/B.Cache.Windows_xx.bin', '/B.Cache.Dx11.bin')
 SOURCE_SNAPSHOT_NAME = 'workspace-source-snapshot-v0.1.json'
 
 def save_report(path: Path, doc: dict) -> None:
@@ -71,7 +70,7 @@ def source_snapshot(target: Path, base: Path) -> dict:
         return {'path': str(cache), 'files': stats}
 
     result = {'version': w.VERSION, 'target_cache': snapshot_one(target),
-              'base_cache': snapshot_one(base)}
+        'base_cache': snapshot_one(base)}
     exe = w._find_target_exe(target)
     st = exe.stat()
     result['target_exe'] = [str(exe.resolve()), st.st_size, st.st_mtime_ns]
@@ -128,7 +127,7 @@ def load_manifest_inventory(target: Path, base: Path, workspace: Path) -> tuple[
 def assert_all_u44_targets(rows: list[dict]) -> None:
     expected_nonvideos = honly.KNOWN_TARGETS
     actual_nonvideos = {(r['namespace'], r['logical_path'], r['expected_hash_base64'],
-                         r['expected_cdn_size_bytes']) for r in rows if r['category'] == 'non-video-resource'}
+        r['expected_cdn_size_bytes']) for r in rows if r['category'] == 'non-video-resource'}
     vids = [r for r in rows if r['category'] in ('video-preview', 'other-video')]
     if len(rows) != 103 or len(vids) != 101 or len(actual_nonvideos) != 2 or actual_nonvideos != expected_nonvideos:
         raise w.ExportError('U44 source inventory changed; refuse a silently incomplete fixed-103 recovery')
@@ -162,9 +161,9 @@ def download_checked(url: str, size: int, timeout: float, tries: int) -> bytes:
     raise w.ExportError(f'Original CDN URL unavailable: {url}: {last}')
 
 def read_or_download(root: Path, row: dict, type_id: int, oodle: w.Oodle,
-                     *, download: bool, timeout: float, retries: int, is_video: bool) -> tuple[bytes, dict]:
+        *, download: bool, timeout: float, retries: int, is_video: bool) -> tuple[bytes, dict]:
     target = w._safe_output_path(root / 'OpenWF' / 'Content', row['namespace'],
-                                 row['logical_path'], type_id, row['expected_hash_base64'])
+        row['logical_path'], type_id, row['expected_hash_base64'])
     if (root.resolve() == target.resolve() or not target.resolve().is_relative_to(root.resolve())
             or target.is_symlink()):
         raise w.ExportError(f'Recovery object path escapes workspace or is a symlink: {target}')
@@ -178,16 +177,16 @@ def read_or_download(root: Path, row: dict, type_id: int, oodle: w.Oodle,
         url = triage.make_cdn_url(row, type_id)
         raw = download_checked(url, row['expected_cdn_size_bytes'], timeout, retries)
     check = (video.validate_cdn_payload(raw, row, oodle) if is_video
-             else honly.validate_h_only_payload(raw, row, type_id, oodle))
+        else honly.validate_h_only_payload(raw, row, type_id, oodle))
     if not target.exists():
         w.atomic_write(target, raw)
     check['relative_path'] = target.relative_to(root).as_posix()
     return raw, check
 
 def recover_videos(rows: list[dict], target: Path, root: Path, oodle: w.Oodle,
-                   *, download: bool, timeout: float, retries: int) -> dict:
+        *, download: bool, timeout: float, retries: int) -> dict:
     videos = sorted((x for x in rows if x['category'] != 'non-video-resource'),
-                    key=lambda x: x['logical_path'])
+        key=lambda x: x['logical_path'])
     # Evidence comes from installed video CommonHeaders, not from filename extension alone.
     inference = triage.infer_video_type(target)
     if inference.get('type_hex') != 'AA' or inference.get('type_confidence') != 'same-extension-cache-peers-not-per-file-proof':
@@ -198,7 +197,7 @@ def recover_videos(rows: list[dict], target: Path, root: Path, oodle: w.Oodle,
     for n, row in enumerate(videos, 1):
         try:
             _, checks = read_or_download(root, row, 0xAA, oodle, download=download,
-                                          timeout=timeout, retries=retries, is_video=True)
+                timeout=timeout, retries=retries, is_video=True)
         except (w.ExportError, OSError, ValueError) as exc:
             print(f'[Missing video {n}/{len(videos)}] {row["logical_path"]}: {exc}')
             # Keep already downloaded validated files for retries, but never write
@@ -213,17 +212,17 @@ def recover_videos(rows: list[dict], target: Path, root: Path, oodle: w.Oodle,
         if n % 10 == 0 or n == len(videos):
             print(f'[Videos] {n}/{len(videos)} fully verified')
     report = {'version': video.RECOVERY_REPORT_FORMAT, 'generated_by_version': w.VERSION,
-              'created_utc': datetime.now(timezone.utc).isoformat(),
-              'source': 'verified live historical content-addressed U44 CDN URLs, not a later update patch',
-              'summary': {'selected': len(successes), 'recovered_validated': len(successes), 'failed': 0},
-              'objects': successes}
+        'created_utc': datetime.now(timezone.utc).isoformat(),
+        'source': 'verified live historical content-addressed U44 CDN URLs, not a later update patch',
+        'summary': {'selected': len(successes), 'recovered_validated': len(successes), 'failed': 0},
+        'objects': successes}
     save_report(root / 'cdn-recovery-v0.1.json', report)
     return report
 
 def recover_h_only(rows: list[dict], target: Path, root: Path, oodle: w.Oodle,
-                   *, download: bool, timeout: float, retries: int) -> dict:
+        *, download: bool, timeout: float, retries: int) -> dict:
     selected = sorted((r for r in rows if r['category'] == 'non-video-resource'),
-                      key=lambda r: r['logical_path'])
+        key=lambda r: r['logical_path'])
     print('[3/5] Recover two H-only objects using installed header peers and verified CDN types')
     peers = honly.infer_peer_types(target, selected)
     root.mkdir(parents=True, exist_ok=True)
@@ -238,12 +237,12 @@ def recover_h_only(rows: list[dict], target: Path, root: Path, oodle: w.Oodle,
         chosen = None
         for type_id in candidates:
             existing = w._safe_output_path(root / 'OpenWF' / 'Content', row['namespace'],
-                                           row['logical_path'], type_id, row['expected_hash_base64'])
+                row['logical_path'], type_id, row['expected_hash_base64'])
             if existing.is_file():
                 # On resume, always revalidate the object, not merely its filename.
                 try:
                     _, checks = read_or_download(root, row, type_id, oodle, download=False,
-                                                  timeout=timeout, retries=retries, is_video=False)
+                        timeout=timeout, retries=retries, is_video=False)
                     chosen = (type_id, checks)
                     break
                 except (w.ExportError, OSError, ValueError) as exc:
@@ -257,7 +256,7 @@ def recover_h_only(rows: list[dict], target: Path, root: Path, oodle: w.Oodle,
                 continue
             try:
                 _, checks = read_or_download(root, row, type_id, oodle, download=True,
-                                              timeout=timeout, retries=retries, is_video=False)
+                    timeout=timeout, retries=retries, is_video=False)
                 chosen = (type_id, checks)
                 break
             except (w.ExportError, OSError, ValueError) as exc:
@@ -267,9 +266,9 @@ def recover_h_only(rows: list[dict], target: Path, root: Path, oodle: w.Oodle,
         type_id, checks = chosen
         print(f'[H-only] {row["logical_path"]} | type {type_id:X} | SHCC/H verified')
         successes.append({key: row[key] for key in ('namespace', 'logical_path', 'expected_hash_base64',
-                                                     'expected_cdn_size_bytes', 'manifest_flags')} |
-                         {'url': triage.make_cdn_url(row, type_id), 'cdn_type_hex': f'{type_id:X}',
-                          'status': 'recovered-validated', **checks})
+            'expected_cdn_size_bytes', 'manifest_flags')} |
+            {'url': triage.make_cdn_url(row, type_id), 'cdn_type_hex': f'{type_id:X}',
+            'status': 'recovered-validated', **checks})
     doc = {'version': honly.VERSION, 'kind': 'h-only-cdn-recovery',
            'created_utc': datetime.now(timezone.utc).isoformat(),
            'summary': {'selected': len(successes), 'recovered_validated': len(successes), 'failed': 0},
@@ -298,8 +297,8 @@ def run(target: Path, base: Path, workspace: Path, output: Path, *, download: bo
     recover_h_only(unresolved, target, h_root, oodle, download=download, timeout=timeout, retries=retries)
     print('[4/5] Strict preflight and cache export; all 103 recovered sources revalidated')
     base_args = [str(target), str(base), '--recovered-cdn', str(vid_root),
-                 '--recovered-h-only', str(h_root),
-                 '--require-static-types', '--no-bundled-type-hints']
+        '--recovered-h-only', str(h_root),
+        '--require-static-types', '--no-bundled-type-hints']
     for family in REQUIRED_FAMILIES:
         base_args.extend(['--required-manifest-family', family])
     audit_pre = workspace / 'offline-patch-audit-preexport-v0.1.json'
@@ -327,7 +326,7 @@ def run(target: Path, base: Path, workspace: Path, output: Path, *, download: bo
     return 0
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__)
+    p = StrictArgumentParser(description=__doc__)
     p.add_argument('target', type=Path)
     p.add_argument('base', type=Path)
     p.add_argument('--workspace', required=True, type=Path, help='Separate, reusable source-recovery workspace')
@@ -339,7 +338,7 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     try:
         return run(a.target, a.base, a.workspace, a.output,
-                   download=a.download, timeout=a.timeout, retries=a.retries)
+            download=a.download, timeout=a.timeout, retries=a.retries)
     except KeyboardInterrupt:
         print('[Interrupted] Verified files already recovered remain in the workspace for a rerun.', file=sys.stderr)
         return 130

@@ -10,7 +10,8 @@ No network activity, no game/patch modifications, no recovered output copies.
 """
 from __future__ import annotations
 
-import argparse
+from common import StrictArgumentParser, error as print_error
+
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -74,25 +75,25 @@ def check_one(row: dict, content: Path, oodle) -> dict:
     if not expected.is_file():
         variants = variants_in_parent(expected)
         record.update(status='exact-object-absent', different_identity_names=variants,
-                      different_identity_count_shown=len(variants))
+            different_identity_count_shown=len(variants))
         return record
     if not expected.resolve().is_relative_to(content.resolve()):
         record.update(status='exact-path-rejected', error='File escapes source Content directory')
         return record
     if expected.stat().st_size != row['expected_cdn_size_bytes']:
         record.update(status='exact-object-rejected', error='File size differs from U44.0.0 manifest',
-                      found_bytes=expected.stat().st_size)
+            found_bytes=expected.stat().st_size)
         return record
     try:
         data = expected.read_bytes()
         checks = (video.validate_cdn_payload(data, row, oodle)
-                  if type_id == 0xAA else honly.validate_h_only_payload(data, row, type_id, oodle))
+            if type_id == 0xAA else honly.validate_h_only_payload(data, row, type_id, oodle))
     except (w.ExportError, OSError, ValueError) as exc:
         record.update(status='exact-object-rejected', error=str(exc)[:400])
         return record
     record.update(status='exact-object-verified', actual_sha256=checks['sha256'],
-                  validation=checks['validation'],
-                  full_payload_identity_limit='U44 manifest pins H CommonHeader, not a historical full-payload SHA256')
+        validation=checks['validation'],
+        full_payload_identity_limit='U44 manifest pins H CommonHeader, not a historical full-payload SHA256')
     return record
 
 def compare(rows: list[dict], source_patch: Path, oodle) -> dict:
@@ -143,7 +144,7 @@ def validate_probe_paths(target: Path, base: Path, source: Path, workspace: Path
             raise w.ExportError('Report workspace cannot overlap an input directory')
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__)
+    p = StrictArgumentParser(description=__doc__)
     p.add_argument('target', type=Path, help='Installed U44.0.0 directory')
     p.add_argument('base', type=Path, help='Original Steam base')
     p.add_argument('source_patch', type=Path, help='Existing U44.0.1 patch directory containing OpenWF/Content')
@@ -166,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         print('[Notice] Only exact verified files could be reused. No files were copied or downloaded.')
         return 0  # Reporting absent objects is not a program failure.
     except (w.ExportError, OSError, ValueError, KeyError) as exc:
-        print(f'ERROR: {exc}', file=sys.stderr)
+        print_error(exc)
         return 2
 
 if __name__ == '__main__':

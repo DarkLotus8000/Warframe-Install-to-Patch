@@ -29,7 +29,7 @@ class TestSource(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.home=Path(self.temp.name)
         self.asset=w.ManifestAsset('0','stripped','/Lotus/Fx/Narin/Ability.bk2', DIGEST,
-                     len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         self.sources=[]
 
     def make_source(self, name, raw=obj()):
@@ -63,7 +63,7 @@ class TestSource(unittest.TestCase):
                + struct.pack('<BII', 2, 50, 3) + b'bad'
                + b'\x52' + b'\0' * 4)
         with patch('recover_missing_cdn._unpack_framed_payload',
-                   side_effect=AssertionError('should not decode F')):
+                side_effect=AssertionError('should not decode F')):
             self.assertEqual(s._decoded_sections(raw, None, kinds='H'), {'H': H})
 
     def test_conflicting_full_payloads_in_two_sources_rejected(self):
@@ -124,7 +124,7 @@ class TestSource(unittest.TestCase):
     def test_malformed_commonheader_type_rejected(self):
         altered_header = DIGEST + struct.pack('<III', 0x14, 0xAB, 1)
         bad = w.SHCC_PREAMBLE + b''.join(struct.pack('<BII', 0, len(c), len(c)) + c
-                                         for c in (altered_header, b'', F))
+            for c in (altered_header, b'', F))
         bad += b'\x52' + struct.pack('<I', w.crc32c(bad + b'\x52'))
         self.make_source('u4401', bad)
         with self.assertRaisesRegex(s.StrippedError, 'Video CommonHeader'):
@@ -208,7 +208,7 @@ class TestEndToEnd(unittest.TestCase):
         self.exe=self.target/'Warframe.x64.exe'
         self.exe.write_bytes(b'fakeexe')
         self.asset=w.ManifestAsset('0','stripped','/Lotus/Fx/Narin/Ability.bk2',DIGEST,
-                     len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         self.source=self.parent/'u4401'
         source_content=self.source/'OpenWF'/'Content'
         source_content.mkdir(parents=True)
@@ -242,8 +242,8 @@ class TestEndToEnd(unittest.TestCase):
              patch.object(fp,'snapshot',return_value={'digest':'stable'}), \
              patch.object(fp,'compare',return_value={'counts':{}}):
             return s.add_missing(patch=self.patch, target=self.target, base=self.base,
-                                 source_patches=(self.source,), allow_cdn=allow_cdn,
-                                 dry_run=dry_run)
+                source_patches=(self.source,), allow_cdn=allow_cdn,
+                dry_run=dry_run)
 
     def test_dry_run_checks_object_but_does_not_publish_it(self):
         result = self.run_add(dry_run=True)
@@ -258,7 +258,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_dry_run_reports_missing_but_does_not_change_patch(self):
         second = w.ManifestAsset('0', 'stripped', '/Lotus/Fx/Narin/Another.bk2',
-                                 DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         result = self.run_add(assets=[self.asset, second], dry_run=True)
         self.assertEqual(result['would_add'], 1)
         self.assertEqual(result['unresolved'], 1)
@@ -270,7 +270,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_cdn_format_failure_in_dry_run_is_reported_and_no_write(self):
         import offline_patch_audit as audit
         second = w.ManifestAsset('0', 'stripped', '/Lotus/Fx/Narin/Another.bk2',
-                                 DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         with patch.object(s, '_download_exact', side_effect=audit.UnsupportedCdnFormatError('unknown marker')) as fetch:
             result = self.run_add(assets=[self.asset, second], dry_run=True, allow_cdn=True)
         self.assertEqual(fetch.call_count, 1)
@@ -282,7 +282,7 @@ class TestEndToEnd(unittest.TestCase):
     def test_cdn_format_failure_in_publish_rolls_back(self):
         import offline_patch_audit as audit
         second = w.ManifestAsset('0', 'stripped', '/Lotus/Fx/Narin/Another.bk2',
-                                 DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         with patch.object(s, '_download_exact', side_effect=audit.UnsupportedCdnFormatError('unknown marker')):
             with self.assertRaises(audit.UnsupportedCdnFormatError):
                 self.run_add(assets=[self.asset, second], allow_cdn=True)
@@ -298,13 +298,13 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_final_copy_verification_failure_rolls_back_both_files(self):
         second = w.ManifestAsset('0', 'stripped', '/Lotus/Fx/Narin/Another.bk2',
-                                 DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         source_content = self.source / 'OpenWF' / 'Content'
         source_second = w._safe_output_path(source_content, '0', second.logical_path,
-                                            0xAA, second.hash_b64)
+            0xAA, second.hash_b64)
         source_second.write_bytes(obj())
         final_second = w._safe_output_path(self.content, '0', second.logical_path,
-                                           0xAA, second.hash_b64)
+            0xAA, second.hash_b64)
         with self.assertRaisesRegex(s.StrippedError, 'Injected final-copy'):
             self.run_add(assets=[self.asset, second], fail_final_for=final_second)
         self.assertFalse(self.output_path.exists())
@@ -328,7 +328,7 @@ class TestEndToEnd(unittest.TestCase):
 
     def test_missing_second_asset_causes_no_patch_mutation(self):
         second=w.ManifestAsset('0','stripped','/Lotus/Fx/Narin/Another.bk2',DIGEST,
-                        len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         with self.assertRaisesRegex(s.StrippedError,'No locally reconstructed'):
             self.run_add(assets=[self.asset,second])
         self.assertFalse(self.output_path.exists())
@@ -353,17 +353,17 @@ class TestCDNEnvelope(unittest.TestCase):
         raw = b'\x81dummy-oodle' + struct.pack('<I', len(self.plain)) + b'\x43'
         raw += struct.pack('<I', w.crc32c(raw))
         asset = w.ManifestAsset('0', 'stripped', '/Lotus/Fx/Narin/Ability.bk2',
-                                DIGEST, len(raw) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            DIGEST, len(raw) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         self.assertEqual(self.audit.verify_cdn_bytes(raw, asset, FakeOodle()),
-                         'outer-oodle-crc-h-sections')
+            'outer-oodle-crc-h-sections')
 
     def test_unknown_footer_reports_signature_and_refuses_payload(self):
         raw = b'\x8cmystery' + struct.pack('<I', len(self.plain)) + b'\x99'
         raw += struct.pack('<I', w.crc32c(raw))
         asset = w.ManifestAsset('0', 'stripped', '/Lotus/Fx/Narin/Ability.bk2',
-                                DIGEST, len(raw) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            DIGEST, len(raw) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         with self.assertRaisesRegex(self.audit.UnsupportedCdnFormatError,
-                                    r'first8=.*footer-marker=0x99.*CRC32C valid') as caught:
+                r'first8=.*footer-marker=0x99.*CRC32C valid') as caught:
             self.audit.verify_cdn_bytes(raw, asset, None)
         self.assertEqual(caught.exception.retryable, False)
 
@@ -376,9 +376,9 @@ class TestCDNEnvelope(unittest.TestCase):
         attempts = []
         with self.assertRaises(self.audit.UnsupportedCdnFormatError):
             fetch_verified(url='https://example.invalid/object', logical_path='0/test',
-                           expected_size=3, timeout=5, get_func=get,
-                           verify_func=reject, retries=5, attempts_log=attempts,
-                           sleeper=lambda _: self.fail('Unexpected retry'))
+                expected_size=3, timeout=5, get_func=get,
+                verify_func=reject, retries=5, attempts_log=attempts,
+                sleeper=lambda _: self.fail('Unexpected retry'))
         self.assertEqual(get.call_count, 1)
         self.assertEqual(attempts[0]['status'], 'integrity-failed')
         self.assertFalse(attempts[0]['retryable'])
@@ -386,7 +386,7 @@ class TestCDNEnvelope(unittest.TestCase):
     def test_console_severity_colors_match_nct(self):
         import common
         self.assertEqual((common.RED, common.YELLOW, common.GREEN, common.CYAN),
-                         ('\x1b[31m', '\x1b[33m', '\x1b[32m', '\x1b[36m'))
+            ('\x1b[31m', '\x1b[33m', '\x1b[32m', '\x1b[36m'))
 
 class TestCRC32C(unittest.TestCase):
     def test_known_castagnoli_vectors(self):
@@ -414,9 +414,9 @@ class VideoAuditTests(unittest.TestCase):
         self.content = self.patch_path / 'OpenWF' / 'Content'
         self.content.mkdir(parents=True)
         self.asset = w.ManifestAsset('0', 'stripped', '/Lotus/Fx/Narin/Ability.bk2',
-                                      DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
+            DIGEST, len(obj()) | w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)
         self.path = w._safe_output_path(self.content, self.asset.namespace, self.asset.logical_path,
-                                        0xAA, self.asset.hash_b64)
+            0xAA, self.asset.hash_b64)
         self.path.parent.mkdir(parents=True)
         self.path.write_bytes(obj())
 
@@ -490,7 +490,7 @@ class VideoAuditTests(unittest.TestCase):
 
     def test_incorrect_piece_flags_fail_closed(self):
         bad = w.ManifestAsset(self.asset.namespace, self.asset.section, self.asset.logical_path,
-                              self.asset.manifest_hash, len(obj()) | w.MANIFEST_FLAG_H)
+            self.asset.manifest_hash, len(obj()) | w.MANIFEST_FLAG_H)
         result = self.audit(assets=[bad])
         self.assertEqual(result['failed'], 1)
         self.assertIn('flags', result['videos'][0]['error'])
@@ -515,7 +515,7 @@ class VideoAuditTests(unittest.TestCase):
                 struct.pack('<BII', 0, len(part), len(part)) + part for part in section)
             raw = body + b'\x52' + struct.pack('<I', w.crc32c(body + b'\x52'))
             filename = w._safe_output_path(content, '0', self.asset.logical_path,
-                                           0xAA, w.b64m_encode(digest))
+                0xAA, w.b64m_encode(digest))
             filename.parent.mkdir(parents=True, exist_ok=True)
             filename.write_bytes(raw)
             return root, filename
@@ -530,7 +530,7 @@ class VideoAuditTests(unittest.TestCase):
              patch.object(s, 'installed_stripped', return_value=[self.asset]), \
              patch.object(s, '_crosscheck_installed_pieces', return_value='pristine-H-match; original-F-not-independently-known'):
             result = s.audit_existing_videos(patch=self.patch_path, target=self.target,
-                                             base=self.base, source_patches=(source,))
+                base=self.base, source_patches=(source,))
         self.assertEqual(result['inconclusive'], 1)
         compare = result['videos'][0]['source_comparisons'][0]
         self.assertEqual(compare['status'], 'f_match')
@@ -542,7 +542,7 @@ class VideoAuditTests(unittest.TestCase):
     def test_comparison_different_f_and_same_h_is_flagged(self):
         source, _file = self.make_video_source(payload=b'different-preview-frames')
         comparisons = s._compare_video_source(self.asset, obj(), F, source,
-                                               source / 'OpenWF' / 'Content', None)
+            source / 'OpenWF' / 'Content', None)
         self.assertEqual(comparisons['status'], 'f_different')
         self.assertTrue(comparisons['same_h_identity'])
         self.assertFalse(comparisons['same_full_cdn_bytes'])
@@ -550,7 +550,7 @@ class VideoAuditTests(unittest.TestCase):
     def test_comparison_different_h_but_same_video_f(self):
         source, _file = self.make_video_source(payload=F, digest=b'fedcba9876543210')
         result = s._compare_video_source(self.asset, obj(), F, source,
-                                         source / 'OpenWF' / 'Content', None)
+            source / 'OpenWF' / 'Content', None)
         self.assertEqual(result['status'], 'f_match')
         self.assertFalse(result['same_h_identity'])
         self.assertFalse(result['same_full_cdn_bytes'])
@@ -558,14 +558,14 @@ class VideoAuditTests(unittest.TestCase):
     def test_comparison_incremental_patch_absence_is_not_mismatch(self):
         source, _file = self.make_video_source()
         result = s._compare_video_source(self.asset, obj(), F, source,
-                                         source / 'OpenWF' / 'Content', None)
+            source / 'OpenWF' / 'Content', None)
         self.assertEqual(result['status'], 'not_present')
 
     def test_comparison_corrupt_source_rejected_not_reported_as_match(self):
         source, file = self.make_video_source(payload=F)
         file.write_bytes(file.read_bytes()[:-1] + b'Z')
         result = s._compare_video_source(self.asset, obj(), F, source,
-                                         source / 'OpenWF' / 'Content', None)
+            source / 'OpenWF' / 'Content', None)
         self.assertEqual(result['status'], 'invalid')
 
     def test_comparison_multiple_same_path_objects_are_ambiguous(self):
@@ -573,7 +573,7 @@ class VideoAuditTests(unittest.TestCase):
         alternative = file.with_name(file.name.replace('_', '_', 1).replace('AA_', 'A9_', 1))
         alternative.write_bytes(file.read_bytes())
         result = s._compare_video_source(self.asset, obj(), F, source,
-                                         source / 'OpenWF' / 'Content', None)
+            source / 'OpenWF' / 'Content', None)
         self.assertEqual(result['status'], 'ambiguous')
 
     def test_source_comparison_symlink_is_rejected(self):
@@ -584,12 +584,12 @@ class VideoAuditTests(unittest.TestCase):
         except (OSError, NotImplementedError):
             self.skipTest('Symlinks unavailable')
         result = s._compare_video_source(self.asset, obj(), F, source,
-                                         source / 'OpenWF' / 'Content', None)
+            source / 'OpenWF' / 'Content', None)
         self.assertEqual(result['status'], 'invalid')
 
     def test_audit_accepts_source_patch_but_rejects_mutating_flags(self):
         opts = add_stripped.parser().parse_args(['-p', 'patch', '-t', 'target', '-b', 'base', '-A', '-s', 'one',
-                                                 '--source-patch', 'two'])
+            '--source-patch', 'two'])
         self.assertEqual(opts.source_patch, [Path('one'), Path('two')])
         for flags in (['-c'], ['-n'], ['-f'], ['-r', '5']):
             with self.subTest(flags=flags), contextlib.redirect_stderr(io.StringIO()):
@@ -611,18 +611,18 @@ class TestOriginalHCache(unittest.TestCase):
         self.rebuild = rebuild
         self.header = b'pristine-h-cache-header-contents'
         self.plain = (w.SHCC_PREAMBLE
-                      + struct.pack('<BII', 0, len(self.header), len(self.header)) + self.header
-                      + struct.pack('<BII', 0, 0, 0) * 2)
+            + struct.pack('<BII', 0, len(self.header), len(self.header)) + self.header
+            + struct.pack('<BII', 0, 0, 0) * 2)
         self.direct = self.plain + b'\x52' + struct.pack('<I', w.crc32c(self.plain + b'\x52'))
 
     def test_direct_and_different_outer_envelope_accepted_when_h_matches(self):
         self.assertEqual(w.verify_h_cache_metadata_object(self.direct, self.header, None),
-                         hashlib.sha256(self.direct).hexdigest())
+            hashlib.sha256(self.direct).hexdigest())
         outer = b'compressed-stream-' * 3 + struct.pack('<I', len(self.plain)) + w.CDN_OUTER_FOOTER_MARKER
         outer += struct.pack('<I', w.crc32c(outer))
         oodle = SimpleNamespace(decompress=lambda raw, length: self.plain)
         self.assertEqual(w.verify_h_cache_metadata_object(outer, self.header, oodle),
-                         hashlib.sha256(outer).hexdigest())
+            hashlib.sha256(outer).hexdigest())
         self.assertNotEqual(self.direct, outer)
 
     def test_h_cache_wrong_header_or_crc_rejected(self):
@@ -671,13 +671,13 @@ class TestOriginalHCache(unittest.TestCase):
         value = '2026.09.22.16.46/rsytTB10v64vR64neflfqw'
         self.assertEqual(self.rebuild.normalize_build_label(value), value)
         self.assertEqual(self.rebuild.h_cache_url(value),
-                         'https://openwf.io/supplementals/static%20data/H.Cache_2026.09.22.16.46_rsytTB10v64vR64neflfqw.bin')
+            'https://openwf.io/supplementals/static%20data/H.Cache_2026.09.22.16.46_rsytTB10v64vR64neflfqw.bin')
         value2 = '2026.06.30.09.08/MOWJj4ozQ+med4chgjXxUg'
         self.assertIn('%2B', self.rebuild.h_cache_url(value2))
         for bad in ('2026.99.22.16.46/rsytTB10v64vR64neflfqw',
-                    '2026.09.22.16.46/../evil',
-                    '2026.09.22.16.46/abc',
-                    'https://evil.site/H.Cache.bin'):
+                '2026.09.22.16.46/../evil',
+                '2026.09.22.16.46/abc',
+                'https://evil.site/H.Cache.bin'):
             with self.subTest(bad=bad), self.assertRaises(self.rebuild.CleanRunError):
                 self.rebuild.normalize_build_label(bad)
 
@@ -686,7 +686,7 @@ class TestOriginalHCache(unittest.TestCase):
             exe = Path(temp)/'Warframe.x64.exe'
             exe.write_bytes(b'prefix|2026.09.22.16.46/rsytTB10v64vR64neflfqw|suffix')
             self.assertEqual(self.rebuild.find_embedded_build_label(exe),
-                             '2026.09.22.16.46/rsytTB10v64vR64neflfqw')
+                '2026.09.22.16.46/rsytTB10v64vR64neflfqw')
             exe.write_bytes(exe.read_bytes() + b' 2026.06.30.09.08/MOWJj4ozQ+med4chgjXxUg')
             self.assertIsNone(self.rebuild.find_embedded_build_label(exe))
 
@@ -716,7 +716,7 @@ class TestOriginalHCache(unittest.TestCase):
         self.assertEqual(report['http_status'], 404)
         with self.assertRaisesRegex(self.rebuild.CleanRunError, '1 MiB'):
             self.rebuild.fetch_original_h_cache(label, timeout=5,
-                                              opener=FakeOpener(b'X' * (1024 * 1024 + 1)))
+                opener=FakeOpener(b'X' * (1024 * 1024 + 1)))
 
 class TestReleaseWorkspaceAndRuntime(unittest.TestCase):
     def test_bundled_oodle_runtime_matches_pinned_binary(self):
@@ -731,7 +731,7 @@ class TestReleaseWorkspaceAndRuntime(unittest.TestCase):
         import rebuild_pristine_u4400 as rebuild
         target = Path('nested-target-relative')
         opts = SimpleNamespace(target=target, base=Path('base'), u4401=Path('source'),
-                               output=Path('output'), output_parent=None)
+            output=Path('output'), output_parent=None)
         with tempfile.TemporaryDirectory() as temp, \
              mock_patch.object(rebuild, 'validate_roots', side_effect=rebuild.CleanRunError('stop')) as validate, \
              contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):

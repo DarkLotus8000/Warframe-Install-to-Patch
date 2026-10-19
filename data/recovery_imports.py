@@ -162,7 +162,7 @@ class RecoveredHOnlyCollection:
             raise w.ExportError('Recovered H-only entry differs from current target manifest')
         type_id = int(row['cdn_type_hex'], 16)
         canonical = w._safe_output_path(self.root / 'OpenWF' / 'Content', asset.namespace,
-                                        asset.logical_path, type_id, asset.hash_b64)
+            asset.logical_path, type_id, asset.hash_b64)
         expected_relative = canonical.relative_to(self.root).as_posix()
         if row.get('relative_path') != expected_relative:
             raise w.ExportError('Recovered H-only filename does not match manifest')
@@ -186,7 +186,7 @@ class U4401ExactCollection:
         self.content = compare.safe_patch_content(source_patch)
         self.root = self.content.parent.parent
         source_report = (report_path if report_path is not None
-                         else Path(__file__).resolve().parent / REPORT_NAME)
+            else Path(__file__).resolve().parent / REPORT_NAME)
         try:
             doc = json.loads(source_report.read_text(encoding='utf-8'))
         except (OSError, ValueError) as exc:
@@ -251,7 +251,7 @@ class U4401ExactCollection:
         if type_id == 0xD2 and (asset.namespace, asset.logical_path, asset.hash_b64, asset.cdn_size) not in honly.KNOWN_TARGETS:
             raise w.ExportError('Unrecognized U44.0.0 H-only resource')
         path = w._safe_output_path(self.content, asset.namespace, asset.logical_path,
-                                   type_id, asset.hash_b64)
+            type_id, asset.hash_b64)
         if (row.get('expected_relative_path') != path.relative_to(self.root).as_posix()
                 or path.is_symlink() or not path.is_file()
                 or not path.resolve().is_relative_to(self.content.resolve())):

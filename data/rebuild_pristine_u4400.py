@@ -12,6 +12,8 @@ This is NOT an installation-only exporter for these 103 absent source objects.
 """
 from __future__ import annotations
 
+from common import StrictArgumentParser
+
 import argparse
 import contextlib
 from datetime import datetime, timezone
@@ -82,7 +84,7 @@ def h_cache_url(build_label: str) -> str:
     return _H_CACHE_ROOT + quote('H.Cache_' + date + '_' + digest + '.bin', safe='.')
 
 def fetch_original_h_cache(build_label: str, *, timeout: float, retries: int = 5,
-                           opener=None, sleeper=None, verify_func=None) -> tuple[bytes | None, dict]:
+        opener=None, sleeper=None, verify_func=None) -> tuple[bytes | None, dict]:
     """Fetch one exact archived H.Cache, retrying only transient failures."""
     if not 1 <= retries <= 20:
         raise ValueError('H.Cache retries must be between 1 and 20')
@@ -119,11 +121,11 @@ def fetch_original_h_cache(build_label: str, *, timeout: float, retries: int = 5
                         raise HCacheVerificationError(f'H.Cache verification failed after {attempt} attempts: {exc}') from exc
                     delay = min(2 ** (attempt - 1), 8)
                     print_warning(f'H.Cache verification failed on attempt {attempt}/{retries}: '
-                                  f'{exc}; retrying in {delay}s')
+                        f'{exc}; retrying in {delay}s')
                     pause(delay)
                     continue
             summary.update({'status': 'downloaded', 'http_status': 200, 'bytes': len(payload),
-                            'sha256': hashlib.sha256(payload).hexdigest()})
+                'sha256': hashlib.sha256(payload).hexdigest()})
             return payload, summary
         if not retryable or attempt == retries:
             raise CleanRunError(f'{failure} (attempt {attempt}/{retries})')
@@ -137,22 +139,22 @@ SCOPE = restore.REQUIRED_FAMILIES
 MANIFEST_TYPE = 0xE  # Installed U44.0.0 H.Cache/B.Cache CDN metadata type.
 
 def export_arguments(videos: Path, honly: Path, comparison_file: Path,
-                     u4401: Path, output: Path, failures: list[dict]) -> dict:
+        u4401: Path, output: Path, failures: list[dict]) -> dict:
     """One source of truth for the direct export_patch() API contract."""
     return dict(manifest_type=MANIFEST_TYPE, dry_run=False, require_complete=False,
-                recovered_cdn_dir=videos, recovered_h_only_dir=honly,
-                u4401_patch=u4401, u4401_report=comparison_file,
-                required_manifest_families=SCOPE,
-                static_type_recovery=True, require_static_types=True,
-                allow_bundled_types=False, published_output_root=output,
-                failure_collector=failures)
+        recovered_cdn_dir=videos, recovered_h_only_dir=honly,
+        u4401_patch=u4401, u4401_report=comparison_file,
+        required_manifest_families=SCOPE,
+        static_type_recovery=True, require_static_types=True,
+        allow_bundled_types=False, published_output_root=output,
+        failure_collector=failures)
 
 def validate_export_contract(target: Path, base: Path, u4401: Path,
-                             workspace: Path, output: Path) -> None:
+        workspace: Path, output: Path) -> None:
     """Fail before source scans/downloads if the one-click exporter API drifted."""
     args = export_arguments(workspace / 'recovered-videos',
-                            workspace / 'recovered-h-only',
-                            workspace / 'u4401-report.json', u4401, output, [])
+        workspace / 'recovered-h-only',
+        workspace / 'u4401-report.json', u4401, output, [])
     try:
         inspect.signature(w.export_patch).bind(target, base, workspace / 'staging', **args)
     except TypeError as exc:
@@ -170,7 +172,7 @@ def write_json(path: Path, data: dict) -> None:
     restore.save_report(path, data)
 
 def validate_roots(target: Path, base: Path, u4401: Path, output: Path,
-                   workspace: Path, report_dir: Path) -> None:
+        workspace: Path, report_dir: Path) -> None:
     sources = [x.resolve(strict=True) for x in (target, base, u4401)]
     if len(set(sources)) != 3 or not all(x.is_dir() for x in sources):
         raise CleanRunError('Target, original Steam base and U44.0.1 patch must be three distinct directories')
@@ -187,7 +189,7 @@ def validate_roots(target: Path, base: Path, u4401: Path, output: Path,
                for other in writable[i+1:]):
             raise CleanRunError('Output, recovery workspace and reports directories must not overlap')
     if any(path.is_symlink() for path in (target, base, u4401, output.parent,
-                                         workspace.parent, report_dir.parent)):
+            workspace.parent, report_dir.parent)):
         raise CleanRunError('Root directory symlink detected; refusing unsafe reconstruction')
     if output.exists() or output.is_symlink():
         raise CleanRunError(f'Fresh output already exists; refusing to overwrite: {output}')
@@ -223,8 +225,8 @@ def check_target_executable(target: Path, baseline: dict, report_dir: Path, phas
     current = snapshot_target_executable(target)
     changed = current['sha256'] != baseline['sha256'] or current['size'] != baseline['size']
     write_json(report_dir / f'executable-fingerprint-{phase}.json',
-               {'phase': phase, 'baseline': baseline, 'observed': current,
-                'content_changed': changed})
+        {'phase': phase, 'baseline': baseline, 'observed': current,
+        'content_changed': changed})
     if changed:
         raise CleanRunError(f'Reference executable changed during this run ({phase}); refusing publication')
 
@@ -232,7 +234,7 @@ def read_only_snapshot(root: Path, *, full_hash: bool) -> dict:
     return fingerprint.snapshot(root, all_cache=full_hash)
 
 def check_source_unchanged(target: Path, base: Path, baselines: dict,
-                           report_dir: Path, phase: str, full_hash: bool) -> None:
+        report_dir: Path, phase: str, full_hash: bool) -> None:
     for key, source in (('target', target), ('base', base)):
         later = read_only_snapshot(source, full_hash=full_hash)
         before = baselines[key]
@@ -289,7 +291,7 @@ def stash_workspace_reports(workspace: Path, report_dir: Path) -> None:
                 shutil.copy2(path, destination)
 
 def build(args: argparse.Namespace, *, work_parent: Path | None = None,
-          report_root: Path | None = None, run_id: str | None = None) -> int:
+        report_root: Path | None = None, run_id: str | None = None) -> int:
     target, base, u4401 = args.target, args.base, args.u4401
     if work_parent is None:
         work_parent = Path(target.resolve(strict=False).anchor) / 'WF-Rebuild'
@@ -348,8 +350,8 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 missing = [module for module in needed if importlib.util.find_spec(module) is None]
                 if missing:
                     raise CleanRunError('Installed executable type analysis requires '
-                                        + ', '.join(missing)
-                                        + '; install requirements.txt before rebuilding')
+                        + ', '.join(missing)
+                        + '; install requirements.txt before rebuilding')
                 # The SHA-256-pinned bundled Oodle DLL lives in data/, not the
                 # short-path workspace. Validate it before any network access.
                 oodle = w.Oodle(PROJECT)
@@ -359,7 +361,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 print('[Clean] Direct exporter API validated before scanning or downloading')
                 workflow['phase'] = 'baseline-snapshots'
                 before = {key: read_only_snapshot(source, full_hash=args.full_source_hash)
-                          for key, source in (('target', target), ('base', base))}
+                    for key, source in (('target', target), ('base', base))}
                 for key, value in before.items():
                     write_json(report_dir / f'cache-snapshot-before-{key}.json', value)
                 baseline_exe = snapshot_target_executable(target)
@@ -372,8 +374,8 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                     raise CleanRunError('Fresh workspace is unexpectedly nonempty')
                 workflow['phase'] = 'fresh-source-inventory-and-three-recovery'
                 recovery = historical.run(workspace, download=True, timeout=args.cdn_timeout,
-                                         oodle=oodle, retries=args.cdn_retries,
-                                         fresh_sources=(target, base, u4401))
+                    oodle=oodle, retries=args.cdn_retries,
+                    fresh_sources=(target, base, u4401))
                 if recovery['summary'].get('fully_verified') != 3:
                     raise CleanRunError('Three exact historical objects not fully recovered; no patch will be exported')
                 comparison_file = workspace / f'u44-0-1-shared-assets-v{w.VERSION}.json'
@@ -392,12 +394,12 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 check_target_executable(target, baseline_exe, report_dir, 'after-recovery')
 
                 common = dict(target=target, base=base,
-                              manifest_type=MANIFEST_TYPE, require_complete=False,
-                              recovered_cdn=videos, recovered_h_only=honly,
-                              u4401_patch=u4401, u4401_report=comparison_file,
-                              required_manifest_families=SCOPE,
-                              static_type_recovery=True, require_static_types=True,
-                              allow_bundled_types=False)
+                    manifest_type=MANIFEST_TYPE, require_complete=False,
+                    recovered_cdn=videos, recovered_h_only=honly,
+                    u4401_patch=u4401, u4401_report=comparison_file,
+                    required_manifest_families=SCOPE,
+                    static_type_recovery=True, require_static_types=True,
+                    allow_bundled_types=False)
                 pre_path = workspace / 'offline-patch-audit-preexport.json'
                 post_path = workspace / 'offline-patch-audit-postexport.json'
                 def preflight() -> bool:
@@ -412,19 +414,19 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 def export(stage: Path, failures: list[dict]) -> int:
                     workflow['phase'] = 'reconstruction'
                     result = w.export_patch(target, base, stage,
-                                            **export_arguments(videos, honly, comparison_file,
-                                                               u4401, output, failures))
+                        **export_arguments(videos, honly, comparison_file,
+                        u4401, output, failures))
                     if result != 0:
                         return result
                     explicit = getattr(args, 'h_cache_build_label', None)
                     build_label = (normalize_build_label(explicit) if explicit else
-                                   find_embedded_build_label(w._find_target_exe(target)))
+                        find_embedded_build_label(w._find_target_exe(target)))
                     if build_label is None:
                         print('[H.Cache] No unambiguous EXE buildLabel; keeping locally reconstructed metadata')
                         workflow['original_h_cache'] = {'status': 'not-resolved', 'source': 'local'}
                         return result
                     metadata = (stage / 'OpenWF' / 'Content' / '0' /
-                                f'H.Cache.bin!E_{w.H_CACHE_SENTINEL_HASH}')
+                        f'H.Cache.bin!E_{w.H_CACHE_SENTINEL_HASH}')
                     if metadata.is_symlink() or not metadata.is_file():
                         raise CleanRunError('Reconstructed H.Cache metadata is missing from staging')
                     reconstructed = metadata.read_bytes()
@@ -440,7 +442,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                             raise
                         print_warning(f'Optional original H.Cache lookup failed: {exc}; retaining local reconstruction')
                         workflow['original_h_cache'] = {'status': 'network-unavailable',
-                                                        'build_label': build_label, 'source': 'local'}
+                            'build_label': build_label, 'source': 'local'}
                         return result
                     if original is None:
                         if explicit:
@@ -451,7 +453,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                     if original != reconstructed:
                         w.atomic_write(metadata, original)
                     workflow['original_h_cache'] = {**record, 'status': 'verified-and-used',
-                                                    'source': 'OpenWF-supplemental'}
+                        'source': 'OpenWF-supplemental'}
                     write_json(workspace / 'original-h-cache-result.json', workflow['original_h_cache'])
                     print(f'[H.Cache] Original OpenWF object verified against pristine H bytes '
                           f'({len(original)} bytes); used in patch')
@@ -499,10 +501,10 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
 
                 workflow['phase'] = 'transactional-export'
                 code = tx.execute(final_output=output, diagnostics_dir=workspace, version=w.VERSION,
-                                  preflight=preflight, export=export, verify=verify,
-                                  protected_sources=(target, base, u4401, videos, honly),
-                                  preflight_report=pre_path, post_audit_report=post_path,
-                                  keep_failed_output=args.keep_failed_output)
+                    preflight=preflight, export=export, verify=verify,
+                    protected_sources=(target, base, u4401, videos, honly),
+                    preflight_report=pre_path, post_audit_report=post_path,
+                    keep_failed_output=args.keep_failed_output)
                 if code != 0:
                     raise CleanRunError(f'Export or deep audit failed (code {code}); see export-result and console log')
                 workflow['status'] = 'verified-and-published'
@@ -548,28 +550,28 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
     return code
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = StrictArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path, required=True)
     parser.add_argument('--base', type=Path, required=True)
     parser.add_argument('--u4401', type=Path, required=True)
     parser.add_argument('--output-parent', type=Path, required=True)
     parser.add_argument('--work-parent', type=Path,
-                        help='optional SHORT temporary parent directory (default: <target drive>\\WF-Rebuild)')
+        help='optional SHORT temporary parent directory (default: <target drive>\\WF-Rebuild)')
     parser.add_argument('--report-root', type=Path, help='optional permanent report parent directory')
     parser.add_argument('--cdn-timeout', type=float, default=30.0)
     parser.add_argument('--full-source-hash', action='store_true',
-                        help='SHA-256 every .cache file as well as all TOCs before and after each phase (slower)')
+        help='SHA-256 every .cache file as well as all TOCs before and after each phase (slower)')
     parser.add_argument('--keep-failed-output', action='store_true',
-                        help='retain failed temporary patch, not publish it')
+        help='retain failed temporary patch, not publish it')
     parser.add_argument('--keep-workspace', action='store_true',
-                        help='retain recovered objects for troubleshooting; a new run still never reuses them')
+        help='retain recovered objects for troubleshooting; a new run still never reuses them')
     args = parser.parse_args(argv)
     if not 1 <= args.cdn_timeout <= 120:
         parser.error('--cdn-timeout must be 1..120 seconds')
     try:
         return build(args, work_parent=args.work_parent, report_root=args.report_root)
     except (OSError, ValueError, CleanRunError, w.ExportError) as exc:
-        print(f'[Initialization error] {exc}', file=sys.stderr)
+        fingerprint.error(f'Initialization failed: {exc}')
         return 2
 
 if __name__ == '__main__':

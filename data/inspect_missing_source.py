@@ -6,7 +6,8 @@ warframe_install_to_patch.py. Writes only new JSON/optional CSV report files.
 """
 from __future__ import annotations
 
-import argparse
+from common import StrictArgumentParser
+
 import base64
 import re
 import csv
@@ -46,7 +47,7 @@ def _classify_absence(asset: w.ManifestAsset, index, oodle: w.Oodle) -> dict:
         # The underlying validator should already have rejected all the
         # packages with a matching H if this was a SourceCoverageError.
         if any(all(w._piece_in_package(index, asset.namespace, asset.logical_path, kind, pkg)
-                   for kind in required) for pkg in matching_packages):
+                for kind in required) for pkg in matching_packages):
             raise w.ExportError(f'Internal mismatch in source-missing classification for {asset.namespace}{asset.logical_path}')
 
     missing_per_package = {
@@ -105,7 +106,7 @@ def analyze(target_root: Path, base_root: Path, *, progress_every: int = 25_000)
     _, header = w._select_h_cache(target_index, oodle)
     h_index = w.parse_h_cache_header(header)
     b_records = [record for record in h_index.records
-                 if record.logical_path.startswith('/B.Cache.') and record.logical_path.endswith('.bin')]
+        if record.logical_path.startswith('/B.Cache.') and record.logical_path.endswith('.bin')]
     if not b_records:
         raise w.ExportError('Target H.Cache.bin lists no B.Cache families')
     raw_assets: list[w.ManifestAsset] = []
@@ -194,10 +195,10 @@ def analyze(target_root: Path, base_root: Path, *, progress_every: int = 25_000)
     }
 
 _CSV_COLUMNS = ('namespace', 'logical_path', 'manifest_section', 'manifest_families',
-                'expected_hash_base64', 'expected_cdn_size_bytes', 'manifest_hbf_flags_hex',
-                'reason', 'required_pieces', 'candidate_cache_packages', 'matching_h_packages',
-                'missing_pieces_by_matching_h_package', 'original_base_status',
-                'original_base_packages', 'original_base_hash_matches', 'source_error')
+    'expected_hash_base64', 'expected_cdn_size_bytes', 'manifest_hbf_flags_hex',
+    'reason', 'required_pieces', 'candidate_cache_packages', 'matching_h_packages',
+    'missing_pieces_by_matching_h_package', 'original_base_status',
+    'original_base_packages', 'original_base_hash_matches', 'source_error')
 
 def write_csv(path: Path, report: dict) -> None:
     with path.open('x', newline='', encoding='utf-8-sig') as handle:
@@ -315,13 +316,13 @@ def verify_base_inheritance(report: dict, base_root: Path) -> dict:
     }
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = StrictArgumentParser(description=__doc__)
     parser.add_argument('target', type=Path, help='Warframe target installation (or Cache.Windows directory)')
     parser.add_argument('base', type=Path, help='original Steam depot installation (or Cache.Windows directory)')
     parser.add_argument('-o', '--output', type=Path, default=Path('missing-source-v0.1.json'))
     parser.add_argument('--csv', type=Path, help='optional CSV output file with one row per missing object')
     parser.add_argument('--progress-every', type=int, default=25_000,
-                        help='print scan progress every N manifest objects (0 to suppress)')
+        help='print scan progress every N manifest objects (0 to suppress)')
     args = parser.parse_args(argv)
     try:
         if args.progress_every < 0:

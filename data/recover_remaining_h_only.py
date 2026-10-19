@@ -9,7 +9,8 @@ empty B/F slots, and size. Original installs and patch outputs are read-only.
 """
 from __future__ import annotations
 
-import argparse
+from common import StrictArgumentParser
+
 import base64
 from collections import Counter
 from datetime import datetime, timezone
@@ -92,8 +93,8 @@ def similarity(target: str, peer: str) -> int:
     return score
 
 def infer_peer_types(target: Path, rows: list[dict], *, max_samples: int = 140,
-                     max_types: int = MAX_TYPES_PER_ASSET,
-                     cache_index=None, oodle=None) -> list[dict]:
+        max_types: int = MAX_TYPES_PER_ASSET,
+        cache_index=None, oodle=None) -> list[dict]:
     if not 2 <= max_samples <= 500 or not 1 <= max_types <= MAX_TYPES_PER_ASSET:
         raise w.ExportError('Invalid sampling budget')
     index = cache_index
@@ -109,7 +110,7 @@ def infer_peer_types(target: Path, rows: list[dict], *, max_samples: int = 140,
     results = []
     for row in rows:
         ranked = sorted(((similarity(row['logical_path'], path), path, entry)
-                         for path, entry in peers), key=lambda x: (-x[0], x[1]))
+            for path, entry in peers), key=lambda x: (-x[0], x[1]))
         counts: Counter[int] = Counter()
         weighted: Counter[int] = Counter()
         examples = {}
@@ -136,8 +137,8 @@ def infer_peer_types(target: Path, rows: list[dict], *, max_samples: int = 140,
             'manifest_flags': row['manifest_flags'],
             'peer_sample_count': successes,
             'peer_candidates': [{'type_hex': f'{t:X}', 'peer_count': counts[t],
-                                 'weighted_score': weighted[t], 'example_peer': examples[t]}
-                                for t in ordered],
+            'weighted_score': weighted[t], 'example_peer': examples[t]}
+            for t in ordered],
             'cdn_checks': [],
         })
     return results
@@ -166,8 +167,8 @@ def run_probes(probe: dict, *, timeout: float = 15, head_func=None) -> None:
             length = response.get('content_length')
             matched = status == 200 and length == item['expected_cdn_size_bytes']
             check = {'type_hex': candidate['type_hex'], 'url': url,
-                     'http_status': status, 'content_length': length,
-                     'size_matched': matched}
+                'http_status': status, 'content_length': length,
+                'size_matched': matched}
             item['cdn_checks'].append(check)
             print(f"[HEAD] {item['logical_path']} | type 0x{type_id:X} | HTTP {status} | size {'matched' if matched else 'unconfirmed'}")
 
@@ -252,7 +253,7 @@ def verified_probe_candidates(original: dict, probe: dict) -> list[tuple[dict, i
     return eligible
 
 def recover(source: dict, probe: dict, output: Path, *, timeout: float = 20,
-            get_func=None, oodle=None) -> dict:
+        get_func=None, oodle=None) -> dict:
     eligible = verified_probe_candidates(source, probe)
     if get_func is None:
         get_func = video._download
@@ -269,14 +270,14 @@ def recover(source: dict, probe: dict, output: Path, *, timeout: float = 20,
     statuses = []
     for row, type_id, url in eligible:
         result = {key: row[key] for key in ('namespace', 'logical_path', 'expected_hash_base64',
-                                           'expected_cdn_size_bytes', 'manifest_flags')}
+            'expected_cdn_size_bytes', 'manifest_flags')}
         result['url'] = url
         result['cdn_type_hex'] = f'{type_id:X}'
         try:
             raw = get_func(url, row['expected_cdn_size_bytes'], timeout)
             details = validate_h_only_payload(raw, row, type_id, oodle)
             path = w._safe_output_path(output / 'OpenWF' / 'Content', row['namespace'],
-                                       row['logical_path'], type_id, row['expected_hash_base64'])
+                row['logical_path'], type_id, row['expected_hash_base64'])
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open('xb') as f:
                 f.write(raw)
@@ -292,8 +293,8 @@ def recover(source: dict, probe: dict, output: Path, *, timeout: float = 20,
     doc = {'version': VERSION, 'kind': 'h-only-cdn-recovery',
            'created_utc': datetime.now(timezone.utc).isoformat(),
            'summary': {'selected': len(statuses),
-                       'recovered_validated': sum(x['status'] == 'recovered-validated' for x in statuses),
-                       'failed': sum(x['status'] != 'recovered-validated' for x in statuses)},
+        'recovered_validated': sum(x['status'] == 'recovered-validated' for x in statuses),
+        'failed': sum(x['status'] != 'recovered-validated' for x in statuses)},
            'objects': statuses,
            'note': 'SHA-256 is newly recorded, not an independently published historical full-CDN digest.'}
     with (output / REPORT_NAME).open('x', encoding='utf-8') as f:
@@ -302,7 +303,7 @@ def recover(source: dict, probe: dict, output: Path, *, timeout: float = 20,
     return doc
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description=__doc__)
+    p = StrictArgumentParser(description=__doc__)
     p.add_argument('source_report', type=Path, help='unresolved-cdn-all-v0.1.json')
     p.add_argument('--target', type=Path, help='target Warframe installation (only for offline peer inference)')
     p.add_argument('--probe-cdn', action='store_true', help='opt in to bounded CDN HEAD checks')
