@@ -669,7 +669,7 @@ class TestOriginalHCache(unittest.TestCase):
 
     def test_build_label_and_url_quoted_correctly(self):
         value = '2026.09.22.16.46/rsytTB10v64vR64neflfqw'
-        self.assertEqual(self.rebuild.normalize_build_label(value), value)
+        self.assertEqual(self.rebuild.normalize_archive_key(value), value)
         self.assertEqual(self.rebuild.h_cache_url(value),
             'https://openwf.io/supplementals/static%20data/H.Cache_2026.09.22.16.46_rsytTB10v64vR64neflfqw.bin')
         value2 = '2026.06.30.09.08/MOWJj4ozQ+med4chgjXxUg'
@@ -679,16 +679,76 @@ class TestOriginalHCache(unittest.TestCase):
                 '2026.09.22.16.46/abc',
                 'https://evil.site/H.Cache.bin'):
             with self.subTest(bad=bad), self.assertRaises(self.rebuild.CleanRunError):
-                self.rebuild.normalize_build_label(bad)
+                self.rebuild.normalize_archive_key(bad)
 
-    def test_unique_executable_build_label_or_none(self):
-        with tempfile.TemporaryDirectory() as temp:
-            exe = Path(temp)/'Warframe.x64.exe'
-            exe.write_bytes(b'prefix|2026.09.22.16.46/rsytTB10v64vR64neflfqw|suffix')
-            self.assertEqual(self.rebuild.find_embedded_build_label(exe),
-                '2026.09.22.16.46/rsytTB10v64vR64neflfqw')
-            exe.write_bytes(exe.read_bytes() + b' 2026.06.30.09.08/MOWJj4ozQ+med4chgjXxUg')
-            self.assertIsNone(self.rebuild.find_embedded_build_label(exe))
+    def test_archive_key_uses_exe_versioninfo_date_and_h_cache_windows_manifest_hash(self):
+        import base64
+        from unittest.mock import patch as mock_patch
+        from types import SimpleNamespace
+        pefile = SimpleNamespace(DIRECTORY_ENTRY={'IMAGE_DIRECTORY_ENTRY_RESOURCE': 2},
+            PEFormatError=type('PEFormatError', (Exception,), {}))
+        date = '2026.09.22.16.46'
+        digest = 'rsytTB10v64vR64neflfqw'
+        h_hash = base64.b64decode(digest.replace('-', '/') + '==')
+        name = b'/B.Cache.Windows.bin'
+        other = b'/B.Cache.Dx11.bin'
+        def row(path, identity):
+            return struct.pack('<I', len(path)) + path + identity + struct.pack('<I', 0)
+        installed_h = (b'\0' * 16 + struct.pack('<II', 14, 2)
+            + row(other, b'z' * 16) + row(name, h_hash))
+        self.assertEqual(self.rebuild.normalize_build_date(date), date)
+        self.assertEqual(self.rebuild.normalize_archive_key(date + '/' + digest), date + '/' + digest)
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / 'Warframe.x64.exe'
+            exe.write_bytes(b'placeholder')
+            class FakePE:
+                def __init__(self, date_value):
+                    entries = {b'FileVersion': b'1.0.0.0', b'buildLabel': date_value}
+                    self.FileInfo = [[SimpleNamespace(StringTable=[SimpleNamespace(entries=entries)])]]
+                def parse_data_directories(self, **kwargs):
+                    pass
+                def close(self):
+                    pass
+            with mock_patch.dict(sys.modules, {'pefile': pefile}), \
+                 mock_patch.object(pefile, 'PE', return_value=FakePE(date.encode()), create=True):
+                self.assertEqual(self.rebuild.find_executable_build_date(exe), date)
+                self.assertEqual(self.rebuild.original_h_cache_archive_key(exe, installed_h), date + '/' + digest)
+            with mock_patch.dict(sys.modules, {'pefile': pefile}), \
+                 mock_patch.object(pefile, 'PE', return_value=FakePE(date.encode('utf-16le')), create=True):
+                self.assertEqual(self.rebuild.original_h_cache_archive_key(exe, installed_h), date + '/' + digest)
+            with mock_patch.dict(sys.modules, {'pefile': pefile}), \
+                 mock_patch.object(pefile, 'PE', return_value=FakePE(b'2026.99.22.16.46'), create=True):
+                self.assertIsNone(self.rebuild.original_h_cache_archive_key(exe, installed_h))
+            # A missing or ambiguous Windows manifest must never pick another
+            # family's hash to construct an unverified archive URL.
+            with mock_patch.dict(sys.modules, {'pefile': pefile}), \
+                 mock_patch.object(pefile, 'PE', return_value=FakePE(date.encode()), create=True):
+                missing = b'\0' * 16 + struct.pack('<II', 14, 1) + row(other, b'z' * 16)
+                with self.assertRaisesRegex(self.rebuild.CleanRunError, 'B.Cache.Windows.bin'):
+                    self.rebuild.original_h_cache_archive_key(exe, missing)
+                duplicate = installed_h + row(name, b'q' * 16)
+                duplicate = duplicate[:20] + struct.pack('<I', 3) + duplicate[24:]
+                with self.assertRaises(w.ExportError):
+                    self.rebuild.original_h_cache_archive_key(exe, duplicate)
+
+    def test_no_multiple_buildlabel_values_or_date_only_as_archive_key(self):
+        from unittest.mock import patch as mock_patch
+        from types import SimpleNamespace
+        pefile = SimpleNamespace(DIRECTORY_ENTRY={'IMAGE_DIRECTORY_ENTRY_RESOURCE': 2},
+            PEFormatError=type('PEFormatError', (Exception,), {}))
+        entries = [
+            SimpleNamespace(entries={b'buildLabel': b'2026.09.22.16.46'}),
+            SimpleNamespace(entries={b'buildLabel': b'2026.10.01.11.30'}),
+        ]
+        class FakePE:
+            FileInfo = [[SimpleNamespace(StringTable=entries)]]
+            def parse_data_directories(self, **kwargs): pass
+            def close(self): pass
+        with mock_patch.dict(sys.modules, {'pefile': pefile}), \
+             mock_patch.object(pefile, 'PE', return_value=FakePE(), create=True):
+            self.assertIsNone(self.rebuild.find_executable_build_date(Path('placeholder.exe')))
+        with self.assertRaises(self.rebuild.CleanRunError):
+            self.rebuild.normalize_archive_key('2026.09.22.16.46')
 
     def test_exact_http_download_and_missing_and_oversize(self):
         from urllib.error import HTTPError

@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 import json
 import importlib.util
 import inspect
-import mmap
 import re
 import hashlib
 from urllib.error import HTTPError, URLError
@@ -41,10 +40,10 @@ import source_inventory as restore
 import warframe_install_to_patch as w
 import stripped_archive
 
-# Build labels have a timestamp and a 22-character build identifier; the
-# identifier in OpenWF filenames must NOT be mistaken for the H.Cache MD5.
-_BUILD_LABEL = re.compile(r'(20\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2})/([A-Za-z0-9+\-]{22})\Z')
-_EMBEDDED_LABEL = re.compile(rb'(20\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2})[/_]([A-Za-z0-9+\-]{22})(?![A-Za-z0-9+\-])')
+# The EXE VERSIONINFO buildLabel contains only the build date. The archive
+# suffix is the B.Cache.Windows.bin manifest hash stored inside H.Cache.bin.
+_BUILD_DATE = re.compile(r'20\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\Z')
+_H_CACHE_ARCHIVE_KEY = re.compile(r'(20\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2})/([A-Za-z0-9+\-]{22})\Z')
 _H_CACHE_ROOT = 'https://openwf.io/supplementals/static%20data/'
 _H_CACHE_MAX_BYTES = 1024 * 1024
 
@@ -52,43 +51,81 @@ class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
-def normalize_build_label(value: str) -> str:
-    """Accept only a complete, syntactically valid Warframe buildLabel."""
-    match = _BUILD_LABEL.fullmatch(value)
-    if match is None:
-        raise CleanRunError('Expected buildLabel YYYY.MM.DD.HH.MM/22-character-id')
+def normalize_build_date(value: str) -> str:
+    if not _BUILD_DATE.fullmatch(value):
+        raise CleanRunError('Expected EXE buildLabel date YYYY.MM.DD.HH.MM')
     try:
-        datetime.strptime(match[1], '%Y.%m.%d.%H.%M')
+        datetime.strptime(value, '%Y.%m.%d.%H.%M')
     except ValueError as exc:
-        raise CleanRunError('Invalid buildLabel date') from exc
+        raise CleanRunError('Invalid EXE buildLabel date') from exc
     return value
 
-def find_embedded_build_label(exe: Path) -> str | None:
-    """Find a single full buildLabel in the pristine EXE, if present."""
-    with exe.open('rb') as src:
-        if not exe.stat().st_size:
-            return None
-        with mmap.mmap(src.fileno(), 0, access=mmap.ACCESS_READ) as raw:
-            found = set()
-            for match in _EMBEDDED_LABEL.finditer(raw):
-                candidate = match[1].decode('ascii') + '/' + match[2].decode('ascii')
-                try:
-                    found.add(normalize_build_label(candidate))
-                except CleanRunError:
-                    continue
-    return next(iter(found)) if len(found) == 1 else None
+def normalize_archive_key(value: str) -> str:
+    match = _H_CACHE_ARCHIVE_KEY.fullmatch(value)
+    if match is None:
+        raise CleanRunError('Expected H.Cache archive key YYYY.MM.DD.HH.MM/22-character-hash')
+    normalize_build_date(match[1])
+    return value
 
-def h_cache_url(build_label: str) -> str:
-    date, digest = normalize_build_label(build_label).split('/', 1)
+def _pe_text(value: str | bytes) -> str:
+    if isinstance(value, str):
+        return value.rstrip('\x00')
+    if b'\x00' in value:
+        return value.decode('utf-16le', errors='replace').rstrip('\x00')
+    return value.decode('utf-8', errors='replace').rstrip('\x00')
+
+def find_executable_build_date(exe: Path) -> str | None:
+    """Read the date-only buildLabel from the executable's PE VERSIONINFO."""
+    import pefile
+    try:
+        pe = pefile.PE(str(exe), fast_load=True)
+    except (OSError, pefile.PEFormatError):
+        return None
+    try:
+        try:
+            pe.parse_data_directories(directories=[
+                pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_RESOURCE']
+            ])
+        except pefile.PEFormatError:
+            return None
+        dates = set()
+        for group in getattr(pe, 'FileInfo', ()) or ():
+            entries = group if isinstance(group, (list, tuple)) else (group,)
+            for entry in entries:
+                for table in getattr(entry, 'StringTable', ()) or ():
+                    for key, value in table.entries.items():
+                        if _pe_text(key).casefold() != 'buildlabel':
+                            continue
+                        try:
+                            dates.add(normalize_build_date(_pe_text(value)))
+                        except CleanRunError:
+                            continue
+        return next(iter(dates)) if len(dates) == 1 else None
+    finally:
+        pe.close()
+
+def original_h_cache_archive_key(exe: Path, installed_h: bytes) -> str | None:
+    """Combine the EXE's build date with the original Windows B.Cache hash."""
+    date = find_executable_build_date(exe)
+    if date is None:
+        return None
+    records = [r for r in w.parse_h_cache_header(installed_h).records
+        if r.logical_path == '/B.Cache.Windows.bin']
+    if len(records) != 1 or len(records[0].target_hash) != 16:
+        raise CleanRunError('Expected a unique B.Cache.Windows.bin hash in installed H.Cache.bin')
+    return normalize_archive_key(date + '/' + w.b64m_encode(records[0].target_hash))
+
+def h_cache_url(archive_key: str) -> str:
+    date, digest = normalize_archive_key(archive_key).split('/', 1)
     return _H_CACHE_ROOT + quote('H.Cache_' + date + '_' + digest + '.bin', safe='.')
 
-def fetch_original_h_cache(build_label: str, *, timeout: float, retries: int = 5,
+def fetch_original_h_cache(archive_key: str, *, timeout: float, retries: int = 5,
         opener=None, sleeper=None, verify_func=None) -> tuple[bytes | None, dict]:
     """Fetch one exact archived H.Cache, retrying only transient failures."""
     if not 1 <= retries <= 20:
         raise ValueError('H.Cache retries must be between 1 and 20')
-    url = h_cache_url(build_label)
-    summary = {'build_label': build_label, 'url': url, 'status': 'not-found', 'attempts': 0}
+    url = h_cache_url(archive_key)
+    summary = {'archive_key': archive_key, 'url': url, 'status': 'not-found', 'attempts': 0}
     opener = opener or build_opener(_NoRedirect())
     pause = time.sleep if sleeper is None else sleeper
     request = Request(url, headers={'User-Agent': 'Warframe-Install-to-Patch/0.1', 'Accept': 'application/octet-stream'})
@@ -438,22 +475,24 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                         u4401, output, failures, families, require_native))
                     if result != 0:
                         return result
-                    explicit = getattr(args, 'h_cache_build_label', None)
-                    build_label = (normalize_build_label(explicit) if explicit else
-                        find_embedded_build_label(w._find_target_exe(target)))
-                    if build_label is None:
-                        print('[H.Cache] No unambiguous EXE buildLabel; keeping locally reconstructed metadata')
-                        workflow['original_h_cache'] = {'status': 'not-resolved', 'source': 'local'}
-                        return result
                     metadata = (stage / 'OpenWF' / 'Content' / '0' /
                         f'H.Cache.bin!E_{w.H_CACHE_SENTINEL_HASH}')
                     if metadata.is_symlink() or not metadata.is_file():
                         raise CleanRunError('Reconstructed H.Cache metadata is missing from staging')
                     reconstructed = metadata.read_bytes()
                     expected_h = stripped_archive._decoded_sections(reconstructed, oodle, kinds='H')['H']
+                    explicit = getattr(args, 'h_cache_build_label', None)
+                    archive_key = (normalize_archive_key(explicit) if explicit else
+                        original_h_cache_archive_key(w._find_target_exe(target), expected_h))
+                    if archive_key is None:
+                        print('[H.Cache] No unique EXE VERSIONINFO buildLabel; keeping local reconstruction')
+                        workflow['original_h_cache'] = {'status': 'not-resolved', 'source': 'local'}
+                        return result
+                    if not explicit:
+                        print(f'[H.Cache] Archive identity: {archive_key} (EXE date + H.Cache manifest hash)')
                     try:
                         original, record = fetch_original_h_cache(
-                            build_label, timeout=args.cdn_timeout, retries=args.cdn_retries,
+                            archive_key, timeout=args.cdn_timeout, retries=args.cdn_retries,
                             verify_func=lambda data: w.verify_h_cache_metadata_object(data, expected_h, oodle))
                     except HCacheVerificationError:
                         raise
@@ -462,12 +501,12 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                             raise
                         print_warning(f'Optional original H.Cache lookup failed: {exc}; retaining local reconstruction')
                         workflow['original_h_cache'] = {'status': 'network-unavailable',
-                            'build_label': build_label, 'source': 'local'}
+                            'archive_key': archive_key, 'source': 'local'}
                         return result
                     if original is None:
                         if explicit:
-                            raise CleanRunError(f'Explicit H.Cache buildLabel has no archived object: {build_label}')
-                        print(f'[H.Cache] No archived H.Cache for {build_label}; keeping local reconstruction')
+                            raise CleanRunError(f'Explicit H.Cache archive key has no archived object: {archive_key}')
+                        print(f'[H.Cache] No archived H.Cache for {archive_key}; keeping local reconstruction')
                         workflow['original_h_cache'] = {**record, 'source': 'local'}
                         return result
                     if original != reconstructed:

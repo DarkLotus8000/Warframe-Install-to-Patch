@@ -40,7 +40,7 @@ Remove `-n` to add verified missing assets. Use `-A` instead for a read-only vid
 - `-o, --output PATH` - Exact new output directory (alternative to `-P`)
 - `-a, --all-stripped` - Include all stripped assets
 - `-c, --stripped-cdn-fallback` - Enable CDN fallback with `-a`
-- `-H, --h-cache-build-label LABEL` - Select an original H.Cache archive
+- `-H, --h-cache-archive-key KEY` - Select an original H.Cache archive
 - `-w, --work-parent PATH` - Temporary workspace parent
 - `-l, --logs-dir PATH` - Log directory
 - `-r, --cdn-retries N` - CDN download attempts

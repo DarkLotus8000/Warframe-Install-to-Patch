@@ -45,8 +45,9 @@ independent F-byte evidence when available.
 
 ## Original H.Cache.bin
 
-An exact OpenWF supplemental filename is constructed from a unique target EXE
-build label or explicit `-H LABEL`. Auto mode falls back to local reconstruction
+An exact OpenWF supplemental filename combines the date-only `buildLabel`
+from EXE VERSIONINFO with the `/B.Cache.Windows.bin` hash in installed
+`H.Cache.bin`, or uses an explicit `-H KEY`. Auto mode falls back to local reconstruction
 when the file is unavailable. An explicit label requires the download. Invalid
 or mismatching HTTP-200 objects are rejected. Downloads are bounded to 1 MiB
 and redirects are refused.

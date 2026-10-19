@@ -48,8 +48,8 @@ def parser() -> StrictArgumentParser:
         help='Maximum attempts per exact CDN object, including integrity failures (1..20)')
     p.add_argument('-T', '--cdn-timeout', type=float, default=30.0,
         help='Per-request timeout for historical CDN and optional H.Cache download (seconds)')
-    p.add_argument('-H', '--h-cache-build-label', type=str,
-        help='Optional exact OpenWF H.Cache archive buildLabel (YYYY.MM.DD.HH.MM/22-char-id); default: autodetect from EXE if possible')
+    p.add_argument('-H', '--h-cache-archive-key', '--h-cache-build-label', type=str, dest='h_cache_build_label',
+        help='Optional original H.Cache archive key (build date/cache hash); default: EXE VERSIONINFO + installed H.Cache')
     p.add_argument('-f', '--full-source-hash', action='store_true',
         help='SHA-256 every cache payload in addition to TOCs/selected payloads (slow)')
     p.add_argument('-a', '--all-stripped', action='store_true',
@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         p.error('--stripped-cdn-fallback requires --all-stripped')
     if opts.h_cache_build_label is not None:
         try:
-            core.normalize_build_label(opts.h_cache_build_label)
+            core.normalize_archive_key(opts.h_cache_build_label)
         except core.CleanRunError as exc:
             p.error(str(exc))
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
