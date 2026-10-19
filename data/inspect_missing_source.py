@@ -235,9 +235,7 @@ def verify_base_inheritance(report: dict, base_root: Path) -> dict:
     objects = report.get('missing_objects')
     if not isinstance(objects, list) or report.get('summary', {}).get('source_missing') != len(objects):
         raise w.ExportError('Invalid missing-source report (object count mismatch)')
-    version = str(report.get('report_version', ''))
-    match = re.fullmatch(r'0\.2\.(\d+)', version)
-    if not match or int(match.group(1)) < 11:
+    if report.get('report_version') != w.VERSION:
         raise w.ExportError('Unsupported missing-source report version')
     base_cache = w.find_cache_windows_dir(base_root.resolve())
     if base_cache.resolve() != Path(report.get('base_cache', '')).resolve():

@@ -1,4 +1,4 @@
-"""Fail-closed offline collectors for recovered CDN, H-only, and U44.0.1 objects.
+"""Fail-closed offline collectors for recovered CDN, H-only, and source-patch objects.
 
 Each collection revalidates the exact target manifest identity and its local
 payload; these classes do not make network requests.
@@ -8,10 +8,8 @@ import hashlib
 import json
 from pathlib import Path
 import recover_missing_cdn as recovery
-import recover_missing_cdn as videos
 import recover_remaining_h_only as hrec
-import recover_remaining_h_only as honly
-import compare_u4401_sources as compare
+import compare_sources as compare
 import warframe_install_to_patch as w
 
 # ---- recovered_cdn_import ----
@@ -43,8 +41,9 @@ class RecoveredCdnCollection:
                 raise w.ExportError('Recovery report contains an unverified object')
             namespace = row.get('namespace')
             logical_path = row.get('logical_path')
-            if namespace != '0' or not isinstance(logical_path, str) or not logical_path.lower().endswith('.bk2'):
-                raise w.ExportError('Unexpected CDN recovery namespace or logical path')
+            w._validate_manifest_namespace(namespace)
+            if not isinstance(logical_path, str) or not logical_path.lower().endswith('.bk2'):
+                raise w.ExportError('Unexpected CDN recovery logical path')
             w._validate_logical_path(logical_path)
             key = (namespace, logical_path)
             if key in self.rows or (namespace.casefold(), logical_path.casefold()) in seen_casefold:
@@ -125,13 +124,22 @@ class RecoveredHOnlyCollection:
                 or counts.get('failed') != 0 or len(rows) > hrec.MAX_ASSETS):
             raise w.ExportError('H-only recovery report incomplete; refused')
         self.rows = {}
+        seen_casefold = set()
         for row in rows:
             if not isinstance(row, dict) or row.get('status') != 'recovered-validated':
                 raise w.ExportError('Unverified H-only object in recovery report')
             key = (row.get('namespace'), row.get('logical_path'), row.get('expected_hash_base64'),
                    row.get('expected_cdn_size_bytes'))
-            if key not in hrec.KNOWN_TARGETS or row.get('manifest_flags') != '0x20000000':
-                raise w.ExportError('Unknown or mismatched U44 H-only recovery object')
+            w._validate_manifest_namespace(row.get('namespace'))
+            if not isinstance(row.get('logical_path'), str):
+                raise w.ExportError('Invalid H-only recovery path')
+            w._validate_logical_path(row['logical_path'])
+            identity_folded = (row['namespace'].casefold(), row['logical_path'].casefold())
+            if identity_folded in seen_casefold:
+                raise w.ExportError('Duplicate/case-conflicting H-only recovery asset')
+            seen_casefold.add(identity_folded)
+            if row.get('manifest_flags') != '0x20000000':
+                raise w.ExportError('Invalid H-only recovery flags')
             identity = key[:2]
             if identity in self.rows:
                 raise w.ExportError('Duplicate H-only recovery asset')
@@ -158,8 +166,11 @@ class RecoveredHOnlyCollection:
         if row is None:
             return None
         key = (asset.namespace, asset.logical_path, asset.hash_b64, asset.cdn_size)
-        if key not in hrec.KNOWN_TARGETS or asset.section != 'stripped' or asset.flags != w.MANIFEST_FLAG_H:
+        if key[:2] not in self.rows or asset.section != 'stripped' or asset.flags != w.MANIFEST_FLAG_H:
             raise w.ExportError('Recovered H-only entry differs from current target manifest')
+        if (row['expected_hash_base64'] != asset.hash_b64 or
+                row['expected_cdn_size_bytes'] != asset.cdn_size):
+            raise w.ExportError('Recovered H-only asset differs from target manifest')
         type_id = int(row['cdn_type_hex'], 16)
         canonical = w._safe_output_path(self.root / 'OpenWF' / 'Content', asset.namespace,
             asset.logical_path, type_id, asset.hash_b64)
@@ -178,10 +189,10 @@ class RecoveredHOnlyCollection:
             raise w.ExportError('H-only SHA-256 changed during validation')
         return data, type_id
 
-# ---- u4401_exact_import ----
-REPORT_NAME = f'u44-0-1-shared-assets-v{w.VERSION}.json'
+# ---- exact-source import ----
+REPORT_NAME = f'manifest-source-comparison-v{w.VERSION}.json'
 
-class U4401ExactCollection:
+class ExactSourceCollection:
     def __init__(self, source_patch: Path, report_path: Path | None = None):
         self.content = compare.safe_patch_content(source_patch)
         self.root = self.content.parent.parent
@@ -190,80 +201,88 @@ class U4401ExactCollection:
         try:
             doc = json.loads(source_report.read_text(encoding='utf-8'))
         except (OSError, ValueError) as exc:
-            raise w.ExportError(f'Cannot read U44.0.1 comparison report: {exc}') from exc
+            raise w.ExportError(f'Cannot read source comparison report: {exc}') from exc
         if (doc.get('kind') != compare.PROBE_KIND or doc.get('version') != w.VERSION
                 or Path(doc.get('source_patch', '')).resolve() != self.root.resolve()):
-            raise w.ExportError('U44.0.1 report does not belong to the supplied source patch')
+            raise w.ExportError('Source comparison does not belong to the supplied source patch')
         records = doc.get('objects')
         summary = doc.get('summary')
-        if not isinstance(records, list) or len(records) != 103 or not isinstance(summary, dict):
-            raise w.ExportError('Expected complete 103-object U44.0.1 comparison report')
+        if not isinstance(records, list) or not isinstance(summary, dict):
+            raise w.ExportError('Invalid source-comparison report')
         self.rows: dict[tuple[str, str], dict] = {}
         distinct = set()
         absent = 0
         for row in records:
             if not isinstance(row, dict):
-                raise w.ExportError('Invalid U44.0.1 report row')
+                raise w.ExportError('Invalid Source comparison row')
             ns, logical = row.get('namespace'), row.get('logical_path')
-            if ns != '0' or not isinstance(logical, str):
-                raise w.ExportError('Unexpected namespace or logical path in U44.0.1 report')
+            w._validate_manifest_namespace(ns)
+            if not isinstance(logical, str):
+                raise w.ExportError('Unexpected logical path in source comparison')
             w._validate_logical_path(logical)
             key = (ns.casefold(), logical.casefold())
             if key in distinct:
-                raise w.ExportError('Duplicate U44.0.1 report asset')
+                raise w.ExportError('Duplicate Source comparison asset')
             distinct.add(key)
             status = row.get('status')
             if status == 'exact-object-absent':
                 absent += 1
                 continue
             if status != 'exact-object-verified':
-                raise w.ExportError(f'Unverified U44.0.1 report entry: {logical}: {status}')
+                raise w.ExportError(f'Unverified Source comparison entry: {logical}: {status}')
             digest = row.get('actual_sha256')
             if not isinstance(digest, str) or len(digest) != 64:
-                raise w.ExportError(f'Missing SHA-256 for U44.0.1 asset: {logical}')
+                raise w.ExportError(f'Missing SHA-256 for source asset: {logical}')
             try:
                 bytes.fromhex(digest)
             except ValueError as exc:
-                raise w.ExportError('Nonhex U44.0.1 SHA-256') from exc
-            type_hex = row.get('u44_0_0_type')
-            if not (type_hex == 'AA' if logical.lower().endswith('.bk2') else type_hex == 'D2'):
-                raise w.ExportError(f'Unexpected U44.0.1 asset type for {logical}')
-            if not isinstance(row.get('u44_0_0_hash'), str) or type(row.get('expected_bytes')) is not int:
-                raise w.ExportError('Missing manifest identity in U44.0.1 report')
+                raise w.ExportError('Nonhex source SHA-256') from exc
+            type_hex = row.get('cdn_type_hex')
+            if not isinstance(type_hex, str) or not type_hex or len(type_hex) > 4:
+                raise w.ExportError(f'Invalid source CDN type for {logical}')
+            try:
+                source_type = int(type_hex, 16)
+            except ValueError as exc:
+                raise w.ExportError(f'Invalid source type for {logical}') from exc
+            if source_type <= 0 or f'{source_type:X}' != type_hex:
+                raise w.ExportError('Noncanonical CDN type in comparison report')
+            if not isinstance(row.get('manifest_hash'), str) or type(row.get('expected_bytes')) is not int:
+                raise w.ExportError('Missing manifest identity in Source comparison')
             self.rows[(ns, logical)] = row
-        if (len(self.rows) != 100 or absent != 3
-                or summary.get('exact_objects_verified') != 100
-                or summary.get('exact_objects_absent') != 3
-                or summary.get('exact_objects_rejected') != 0
-                or summary.get('remaining_not_verified') != 3):
-            raise w.ExportError('U44.0.1 comparison totals disagree or source coverage changed')
+        if (len(self.rows) + absent != len(records) or
+                summary.get('exact_objects_verified') != len(self.rows) or
+                summary.get('exact_objects_absent') != absent or
+                summary.get('exact_objects_rejected') != 0 or
+                summary.get('remaining_not_verified') != absent or
+                summary.get('required_missing_objects') != len(records)):
+            raise w.ExportError('Source comparison counts disagree with validated object rows')
 
     def validate_asset(self, asset: w.ManifestAsset, oodle: w.Oodle) -> tuple[bytes, int] | None:
         row = self.rows.get((asset.namespace, asset.logical_path))
         if row is None:
             return None
-        type_id = 0xAA if asset.logical_path.lower().endswith('.bk2') else 0xD2
+        type_id = int(row['cdn_type_hex'], 16)
         if (asset.section != 'stripped' or asset.flags != (w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F
-                if type_id == 0xAA else w.MANIFEST_FLAG_H)
-                or asset.hash_b64 != row['u44_0_0_hash'] or asset.cdn_size != row['expected_bytes']
-                or row['u44_0_0_type'] != f'{type_id:X}'):
-            raise w.ExportError(f'U44.0.1 source no longer matches U44.0.0 manifest: {asset.logical_path}')
-        if type_id == 0xD2 and (asset.namespace, asset.logical_path, asset.hash_b64, asset.cdn_size) not in honly.KNOWN_TARGETS:
-            raise w.ExportError('Unrecognized U44.0.0 H-only resource')
+                if asset.logical_path.lower().endswith('.bk2') else w.MANIFEST_FLAG_H)
+                or asset.hash_b64 != row['manifest_hash'] or asset.cdn_size != row['expected_bytes']
+                or row['cdn_type_hex'] != f'{type_id:X}'):
+            raise w.ExportError(f'Exact source no longer matches target manifest: {asset.logical_path}')
         path = w._safe_output_path(self.content, asset.namespace, asset.logical_path,
             type_id, asset.hash_b64)
         if (row.get('expected_relative_path') != path.relative_to(self.root).as_posix()
                 or path.is_symlink() or not path.is_file()
                 or not path.resolve().is_relative_to(self.content.resolve())):
-            raise w.ExportError(f'U44.0.1 source path changed/escaped: {asset.logical_path}')
+            raise w.ExportError(f'Exact source path changed/escaped: {asset.logical_path}')
         raw = path.read_bytes()
         if hashlib.sha256(raw).hexdigest().lower() != row['actual_sha256'].lower():
-            raise w.ExportError(f'U44.0.1 source SHA-256 changed: {asset.logical_path}')
+            raise w.ExportError(f'Exact source SHA-256 changed: {asset.logical_path}')
         manifest_row = {'expected_cdn_size_bytes': asset.cdn_size, 'expected_hash_base64': asset.hash_b64}
-        if type_id == 0xAA:
-            checked = videos.validate_cdn_payload(raw, manifest_row, oodle)
+        if asset.logical_path.lower().endswith('.bk2'):
+            if type_id != 0xAA:
+                raise w.ExportError('Unexpected exact-source video type')
+            checked = recovery.validate_cdn_payload(raw, manifest_row, oodle)
         else:
-            checked = honly.validate_h_only_payload(raw, manifest_row, type_id, oodle)
+            checked = hrec.validate_h_only_payload(raw, manifest_row, type_id, oodle)
         if checked['sha256'].lower() != row['actual_sha256'].lower():
-            raise w.ExportError('U44.0.1 source SHA-256 validation disagreement')
+            raise w.ExportError('Exact source SHA-256 validation disagreement')
         return raw, type_id

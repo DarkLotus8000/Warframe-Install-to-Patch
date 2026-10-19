@@ -2,28 +2,27 @@
 
 ## Scope
 
-v0.1 exports an **OpenWF-compatible U44.0.0 EN/DX11 patch** from an untouched
-final installation and its original Steam base. It uses the four installed
-`B.Cache.Windows` manifest families (base, `_en`, `_xx`, `Dx11`), not missing
-language or DX12 variants. The normal reconstruction requires 100 exact
-U44.0.0-identity objects obtainable from a U44.0.1 patch and three pinned
-historical CDN objects. Other versions require their own recovery profile; the manifest parser alone
-does not make the U44-specific recovery steps reusable without validation.
+v0.1 exports an OpenWF-compatible patch from the intact installed manifests
+and original Steam base. U44.0.0 EN/DX11 is the tested recovery case; the
+installed B.Cache manifest families determine export scope. Recovery identities and counts are derived from the installed manifests.
+Exact objects are reused from the supplied source patch when valid; otherwise
+CDN candidates are resolved and validated. Native type analysis and the
+installed-manifest scope still have U44-specific restrictions.
 
 ## Workflow
 
 `install_to_patch.py`:
 
-1. Validate the separate target, base, U44.0.1, workspace and output paths.
+1. Validate the separate target, base, optional source patch, workspace and output paths.
 2. Fingerprint source TOCs, selected cache payloads and the executable.
 3. Parse `H.Cache.bin`, installed manifests and source H/B/F cache entries.
 4. Resolve native CDN types, base inheritance and missing source pieces.
-5. Verify 100 exact-identity U44.0.1 objects and recover the three pinned CDN objects.
+5. Verify exact source-patch identities and recover unresolved CDN objects.
 6. Export the selected objects and run pre-publication deep audits.
 7. Optionally add every manifest-declared stripped asset (`-a`).
 8. Recheck source fingerprints and publish the staged patch to a new directory.
 
-The reference installations and U44.0.1 patch remain read-only. The exporter
+The reference installations and optional source patch remain read-only. The exporter
 never consumes old diagnostics, previous recovery directories or a previously
 exported patch as evidence. Invalid inputs or unverifiable resources fail
 without publishing a partial output.
@@ -61,7 +60,7 @@ a validated original file do not need regeneration.
 ## Stripped assets
 
 `-a` or `add_stripped.py` works **only** on objects in the installed manifests'
-`stripped` sections (528 entries for this U44.0.0 profile). The order of
+`stripped` sections (the count comes from the installed manifest). The order of
 recovery is original target/base cache, optional exact-identity source patch,
 and explicitly enabled exact-ID CDN fallback. CDN downloads must match the
 original manifest's identity, size and decoded sections. Newer different-H
@@ -98,9 +97,9 @@ passes. Interactive status colors match NCT; logs remain ANSI-free.
 | Module | Responsibility |
 | --- | --- |
 | `data/warframe_install_to_patch.py` | Cache/manifest parsing, CDN object encoding, export engine |
-| `data/rebuild_pristine_u4400.py`, `data/restore_u44_complete.py` | Clean source workflow and recovery staging |
-| `data/inspect_*`, `data/compare_u4401_sources.py` | Installed-source inventory and exact-object comparison |
-| `data/recover_*`, `data/recovery_imports.py` | Verified historical CDN and local source recovery |
+| `data/rebuild_patch.py`, `data/source_inventory.py` | Clean source workflow and recovery staging |
+| `data/inspect_*`, `data/compare_sources.py` | Installed-source inventory and exact-object comparison |
+| `data/recover_manifest_sources.py`, `data/recovery_imports.py` | Verified historical CDN and local source recovery |
 | `data/installed_type_resolver.py` | Native PE/Packages-based CDN type resolution |
 | `data/offline_patch_audit.py`, `data/stripped_archive.py` | Deep validation, stripped enrichment and video audit |
 | `data/export_transaction.py`, `data/common.py` | Safe publication, source fingerprints, HTTP retry and logging |

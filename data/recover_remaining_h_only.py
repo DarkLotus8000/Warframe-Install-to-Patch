@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in, fail-closed recovery of two U44 H-only resources.
+"""Opt-in, fail-closed recovery of manifest-missing H-only resources.
 
 Offline mode ranks installed H CommonHeader *peer* types. This is only a
 heuristic and never asserts the missing object's type. --probe-cdn issues
@@ -28,41 +28,41 @@ import warframe_install_to_patch as w
 
 VERSION = w.VERSION
 REPORT_NAME = 'cdn-h-only-recovery-v0.1.json'
-MAX_ASSETS = 2
+MAX_ASSETS = 1024
 MAX_TYPES_PER_ASSET = 12
-MAX_ITEM_BYTES = 8192
-# These entries are *manifest hash-locked*, not loose paths or inferred types.
-KNOWN_TARGETS = {
-    ('0', '/Lotus/Fx/PowersuitAbilities/Decree/SonarWeakSpotCapsuleMat',
-     'SZJetTq813ezgKwg2nTXlA', 687),
-    ('0', '/Lotus/Objects/Natural/Skybox/NinetyNine/HubParallax/Building01a',
-     '35O5zuNZnbDNtIyw070Bqg', 955),
-}
+MAX_ITEM_BYTES = 64 * 1024 * 1024
 
 def target_rows(source: dict) -> list[dict]:
     if source.get('version') != w.VERSION:
-        raise w.ExportError('Expected v0.1 unresolved-content report')
-    summary = source.get('summary', {})
-    if summary.get('unresolved_in_both') != len(source.get('objects', [])):
+        raise w.ExportError('Invalid unresolved-content report version')
+    objects = source.get('objects')
+    if not isinstance(objects, list) or source.get('summary', {}).get('unresolved_in_both') != len(objects):
         raise w.ExportError('Unresolved-content report count mismatch')
     found = []
     seen = set()
-    for row in source['objects']:
+    for row in objects:
         if row.get('category') != 'non-video-resource':
             continue
-        key = (row.get('namespace'), row.get('logical_path'),
-               row.get('expected_hash_base64'), row.get('expected_cdn_size_bytes'))
-        if key not in KNOWN_TARGETS or key in seen:
-            raise w.ExportError('Unexpected or duplicate H-only resource in source report')
+        namespace, logical = row.get('namespace'), row.get('logical_path')
+        if not isinstance(namespace, str) or not isinstance(logical, str):
+            raise w.ExportError('Invalid H-only manifest identity')
+        w._validate_logical_path(logical)
+        key = (namespace.casefold(), logical.casefold())
+        if key in seen:
+            raise w.ExportError('Duplicate or case-conflicting H-only resource')
         seen.add(key)
-        w._validate_logical_path(row['logical_path'])
-        if (row.get('manifest_flags') != '0x20000000' or
-                row.get('manifest_section') != 'stripped' or row.get('required_pieces') != []):
-            raise w.ExportError('H-only manifest flags/section differ from U44 report')
+        if row.get('manifest_flags') != '0x20000000' or row.get('required_pieces') != []:
+            raise w.ExportError('Unsupported H-only manifest flags')
+        if row.get('manifest_section') != 'stripped':
+            raise w.ExportError('H-only resource was not declared stripped')
+        if not isinstance(row.get('expected_hash_base64'), str) or not triage.HASH_RE.fullmatch(row['expected_hash_base64']):
+            raise w.ExportError('Invalid H-only manifest hash')
+        size = row.get('expected_cdn_size_bytes')
+        if type(size) is not int or not 40 <= size <= MAX_ITEM_BYTES:
+            raise w.ExportError('Invalid H-only CDN size')
         found.append(row)
-    if set((r['namespace'], r['logical_path'], r['expected_hash_base64'],
-            r['expected_cdn_size_bytes']) for r in found) != KNOWN_TARGETS:
-        raise w.ExportError('Source report does not contain both expected U44 H-only resources')
+    if len(found) > MAX_ASSETS:
+        raise w.ExportError('Too many missing H-only resources')
     return found
 
 def similarity(target: str, peer: str) -> int:
@@ -101,16 +101,16 @@ def infer_peer_types(target: Path, rows: list[dict], *, max_samples: int = 140,
     if index is None:
         index = w.scan_cache(w.find_cache_windows_dir(target.resolve()), 'H')
     oodle = oodle or w.Oodle(Path(w.__file__).resolve().parent)
-    peers = []
+    peers_by_namespace = {}
     for (ns, path), kinds in index.items():
-        if ns != '0' or not path.startswith('/Lotus/'):
+        if not path.startswith('/Lotus/') or not kinds.get('H'):
             continue
-        if kinds.get('H'):
-            peers.append((path, kinds['H'][0]))
+        peers_by_namespace.setdefault(ns, []).append((path, kinds['H'][0]))
     results = []
     for row in rows:
+        namespace = w._validate_manifest_namespace(row['namespace'])
         ranked = sorted(((similarity(row['logical_path'], path), path, entry)
-            for path, entry in peers), key=lambda x: (-x[0], x[1]))
+            for path, entry in peers_by_namespace.get(namespace, ())), key=lambda x: (-x[0], x[1]))
         counts: Counter[int] = Counter()
         weighted: Counter[int] = Counter()
         examples = {}

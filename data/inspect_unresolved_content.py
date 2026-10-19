@@ -233,8 +233,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--timeout', type=float, default=6, help='timeout per HEAD request in seconds (default 6)')
     args = parser.parse_args(argv)
     try:
-        if not 0 <= args.max_probes <= 103 or not 0.5 <= args.timeout <= 30:
-            raise w.ExportError('max-probes must be 0..103 and timeout 0.5..30')
+        if not 0 <= args.max_probes <= 2048 or not 0.5 <= args.timeout <= 30:
+            raise w.ExportError('max-probes must be 0..2048 and timeout 0.5..30')
         source = args.missing_report.resolve()
         base = args.base_report.resolve()
         out = args.output.resolve()

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Build and verify a Warframe update patch using a supported recovery profile.
+"""Build and verify a Warframe update patch from its installed manifests.
 
-The current recovery profile is U44.0.0 EN/DX11; other versions require
-version-specific recovery evidence and validation before they can be exported.
+Unverifiable assets cause a failed export instead of incomplete publication.
 """
 from __future__ import annotations
 
@@ -22,20 +21,20 @@ if not DATA_DIR.is_dir():
     raise SystemExit('Missing bundled data directory. Extract the COMPLETE release archive.')
 sys.path.insert(0, str(DATA_DIR))
 
-import rebuild_pristine_u4400 as core
+import rebuild_patch as core
 from common import VERSION, StrictArgumentParser, error as print_error, warning as print_warning
 
 def parser() -> StrictArgumentParser:
     p = StrictArgumentParser(
-        description='Reconstruct and deep-verify an update patch (currently supports U44.0.0 EN/DX11).',
+        description='Reconstruct and deep-verify an update patch from an untouched installation.',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument('-v', '--version', action='version', version=f'Warframe Install-to-Patch {VERSION}')
     p.add_argument('-t', '--target', type=Path, required=True,
-        help='Untouched final installation (current profile: U44.0.0 EN/DX11)')
+        help='Untouched final Warframe installation')
     p.add_argument('-b', '--base', type=Path, required=True,
         help='Untouched original Steam base')
-    p.add_argument('-u', '--source-patch', '--u4401', dest='u4401', type=Path, required=True,
-        help='Exact-identity recovery patch (current profile requires U44.0.1)')
+    p.add_argument('-u', '--source-patch', '--u4401', dest='u4401', type=Path,
+        help='Optional exact-identity source patch; unavailable objects are attempted through original CDN URLs')
     output = p.add_mutually_exclusive_group(required=True)
     output.add_argument('-P', '--output-parent', type=Path,
         help='Parent directory for a uniquely named new patch')
@@ -145,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             p.error(str(exc))
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
     logs = opts.logs_dir.resolve(strict=False)
-    print(f'[Install-to-Patch {VERSION}] Recovery profile: U44.0.0 EN/DX11')
+    print(f'[Install-to-Patch {VERSION}] Manifest-derived recovery')
     print('[Inputs] Only installed target manifests and independently authenticated recovery objects')
     print('[Run] One command; no earlier run data, no runtime-request list, no old patch reuse')
     print(f'[Logs] {logs / (run_id + ".log")} and {logs / (run_id + ".json")}')

@@ -17,11 +17,9 @@ import tempfile
 import warframe_install_to_patch as w
 import offline_patch_audit as audit
 import common as fingerprint
-from restore_u44_complete import REQUIRED_FAMILIES
 import inspect_unresolved_content as cdn
 import recover_missing_cdn as fetcher
-import recover_u4400_last_three as historical
-import compare_u4401_sources as compare_sources
+import compare_sources as compare_sources
 from common import label as color_label, warning as print_warning
 from common import fetch_verified
 
@@ -75,23 +73,20 @@ def _verify_asset(path: Path, asset: w.ManifestAsset, oodle: w.Oodle,
 def installed_stripped(target: Path, oodle: w.Oodle, target_index=None) -> list[w.ManifestAsset]:
     idx = target_index if target_index is not None else w.scan_cache(w.find_cache_windows_dir(target))
     _, raw = w._select_h_cache(idx, oodle)
-    records = [r for r in w.parse_h_cache_header(raw).records if r.logical_path.startswith('/B.Cache.')]
+    records = [r for r in w.parse_h_cache_header(raw).records
+        if w.H_CACHE_B_CACHE_RE.fullmatch(r.logical_path)]
     all_assets = []
     available = []
     for rec in records:
-        if not w.H_CACHE_B_CACHE_RE.fullmatch(rec.logical_path):
-            raise StrippedError(f'Unexpected manifest name: {rec.logical_path}')
-        if rec.logical_path not in REQUIRED_FAMILIES:
-            continue
         try:
             _, header, _ = w._build_h_only_metadata_object(idx, rec.logical_path, rec.target_hash, oodle)
-        except w.SourceCoverageError as exc:
-            raise StrippedError(f'Required manifest missing: {rec.logical_path}: {exc}') from exc
+        except w.SourceCoverageError:
+            # Uninstalled language/DirectX family: never treat it as exported.
+            continue
         all_assets.extend(w.parse_manifest_header(header, w._manifest_namespace(rec.logical_path)))
         available.append(rec.logical_path)
-    missing = set(REQUIRED_FAMILIES) - set(available)
-    if missing:
-        raise StrippedError('Installed scope is incomplete: ' + ', '.join(sorted(missing)))
+    if not available:
+        raise StrippedError('No installed manifest families were available')
     assets, _ = w._dedupe_manifest_assets(all_assets)
     return [asset for asset in assets if asset.section == 'stripped']
 
@@ -112,9 +107,13 @@ def validate_patch_identity(patch: Path, target: Path, oodle: w.Oodle, idx) -> N
     h_entry, h_data = w._select_h_cache(idx, oodle)
     expected = [(f'H.Cache.bin!E_{w.H_CACHE_SENTINEL_HASH}', w.build_shcc(h_entry, None, None))]
     for rec in w.parse_h_cache_header(h_data).records:
-        if rec.logical_path in REQUIRED_FAMILIES:
+        if not w.H_CACHE_B_CACHE_RE.fullmatch(rec.logical_path):
+            continue
+        try:
             obj, _, _ = w._build_h_only_metadata_object(idx, rec.logical_path, rec.target_hash, oodle)
-            expected.append((f'{rec.logical_path.lstrip("/")}!E_{w.b64m_encode(rec.target_hash)}', obj))
+        except w.SourceCoverageError:
+            continue
+        expected.append((f'{rec.logical_path.lstrip("/")}!E_{w.b64m_encode(rec.target_hash)}', obj))
     for rel, data in expected:
         path = root / '0' / rel
         _require_regular_path(path, root)
@@ -144,19 +143,13 @@ def _expected_type(asset: w.ManifestAsset, ti, bi, oodle, resolver) -> int:
         except w.SourceCoverageError:
             continue
         resolved, _evidence = w.resolve_common_header_type(
-            asset, parsed_type, {}, allow_bundled=False,
+            asset, parsed_type, {},
             installed_type=evidence_for_asset(resolver, asset, parsed_type))
         return resolved
-    # The only permitted cache-absent exceptions are the independently
-    # validated U44.0.0 historical exact identities (one video + two H-only)
-    # and the 100 precise original stripped .bk2 identities already in patch.
-    pinned = historical.PINNED.get(asset.logical_path)
-    if pinned is not None and (asset.hash_b64, asset.cdn_size) == pinned[:2]:
-        return pinned[2]
     if (asset.namespace == '0' and asset.logical_path.lower().endswith('.bk2')
             and asset.flags == (w.MANIFEST_FLAG_H | w.MANIFEST_FLAG_F)):
         return 0xAA
-    raise StrippedError(f'Unable to independently establish CDN type for {asset.namespace}{asset.logical_path}')
+    raise StrippedError(f'No independent CDN type evidence for {asset.namespace}{asset.logical_path}')
 
 def _existing_asset(root: Path, asset: w.ManifestAsset, oodle: w.Oodle, expected_type: int,
         *, verify: bool = True) -> Path | None:
@@ -545,10 +538,40 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
     validate_patch_identity(patch, target, oodle, ti)
     assets = installed_stripped(target, oodle, ti)
     from installed_type_resolver import prepare
-    resolver = prepare(w._find_target_exe(target), ti, oodle, required=True)
+    resolver = prepare(w._find_target_exe(target), ti, oodle, required=False)
     root = patch / 'OpenWF' / 'Content'
-    typed_assets = [(asset, _expected_type(asset, ti, bi, oodle, resolver))
-        for asset in assets]
+    def expected_type(asset):
+        try:
+            return _expected_type(asset, ti, bi, oodle, resolver)
+        except StrippedError:
+            # The original manifest H digest covers the CommonHeader type. An
+            # existing hash-matched object can therefore independently supply
+            # that type after decoding and validating its full H section.
+            relative = w._safe_output_path(root, asset.namespace, asset.logical_path, 0, asset.hash_b64)
+            parent = relative.parent
+            if not parent.is_dir() or _is_redirect(parent):
+                raise
+            stem = w._validate_logical_path(asset.logical_path)[-1] + '!'
+            matches = [f for f in parent.iterdir()
+                if f.name.startswith(stem) and f.name.endswith('_' + asset.hash_b64)]
+            if len(matches) != 1:
+                raise
+            candidate = matches[0]
+            _require_regular_path(candidate, root)
+            if _is_redirect(candidate) or not candidate.is_file():
+                raise
+            raw = candidate.read_bytes()
+            audit.verify_cdn_bytes(raw, asset, oodle)
+            h = _decoded_sections(raw, oodle, kinds='H')['H']
+            header_hash, parsed_type = w.parse_common_header(h)
+            if header_hash != asset.manifest_hash:
+                raise StrippedError('Existing CDN H identity differs from the original manifest')
+            filename_type = candidate.name[len(stem):].split('_', 1)[0]
+            if filename_type != f'{parsed_type:X}':
+                raise StrippedError('CDN filename type disagrees with decoded H CommonHeader')
+            return parsed_type
+
+    typed_assets = [(asset, expected_type(asset)) for asset in assets]
     pending = [(asset, type_id) for asset, type_id in typed_assets
         if _existing_asset(root, asset, oodle, type_id) is None]
     print(f'[Stripped] {len(assets):,} declared; {len(assets)-len(pending):,} already verified; '
@@ -602,14 +625,13 @@ def add_missing(*, patch: Path, target: Path, base: Path, allow_cdn: bool = Fals
                 label, index, selected = source
                 _h, _header, header_type = selected
                 confirmed_type, _evidence = w.resolve_common_header_type(
-                    asset, header_type, {}, allow_bundled=False,
+                    asset, header_type, {},
                     installed_type=evidence_for_asset(resolver, asset, header_type))
                 if confirmed_type != cdn_type:
                     raise StrippedError(f'Internal CDN type disagreement: {asset.namespace}{asset.logical_path}')
                 try:
                     raw, final_type, _package, _type_source = w._build_object_for_asset(
-                        asset, index, oodle, installed_resolver=resolver,
-                        allow_bundled_types=False)
+                        asset, index, oodle, installed_resolver=resolver)
                     if cdn_type != final_type:
                         raise StrippedError(f'Internal CDN type disagreement: {asset.namespace}{asset.logical_path}')
                     method = 'local-' + label

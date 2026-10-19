@@ -148,7 +148,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         deep_pieces: bool = False, deep_patch: bool = False,
         max_examples: int = 100, progress: int = 25000, manifest_type: int = 0xE,
         type_evidence_path: Path | None = None, allow_cross_version_types: bool = False,
-        allow_bundled_types: bool = True, require_complete: bool = False,
+        require_complete: bool = False,
         required_manifest_families: tuple[str, ...] = (),
         static_type_recovery: bool = False, require_static_types: bool = False,
         oodle: w.Oodle | None = None) -> dict:
@@ -202,7 +202,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
 
     installed_resolver = None
     if static_type_recovery:
-        from installed_type_resolver import prepare, preflight_pinned_types
+        from installed_type_resolver import prepare
         try:
             target_exe = w._find_target_exe(target)
         except w.ExportError:
@@ -211,26 +211,22 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
             print('[Audit static types] No installed executable; native recovery unavailable')
         else:
             installed_resolver = prepare(target_exe, ti, oodle, required=require_static_types)
-            if installed_resolver is not None:
-                preflight_pinned_types(installed_resolver, ti, oodle, assets,
-                    required=require_static_types)
-
     from recovery_imports import RecoveredCdnCollection
     from recovery_imports import RecoveredHOnlyCollection
     videos = RecoveredCdnCollection(recovered_cdn) if recovered_cdn is not None else None
     h_only = RecoveredHOnlyCollection(recovered_h_only) if recovered_h_only is not None else None
-    from recovery_imports import U4401ExactCollection
-    u4401 = U4401ExactCollection(u4401_patch, u4401_report) if u4401_patch is not None else None
+    from recovery_imports import ExactSourceCollection
+    u4401 = ExactSourceCollection(u4401_patch, u4401_report) if u4401_patch is not None else None
     if u4401 is not None:
         for protected in (target, base, patch):
             if protected is not None and (protected == u4401.root or protected.is_relative_to(u4401.root)
                     or u4401.root.is_relative_to(protected)):
-                raise w.ExportError('U44.0.1 source overlaps target/base/output patch')
+                raise w.ExportError('Exact source patch overlaps target/base/output patch')
     video_keys = set(videos.rows) if videos else set()
     h_only_keys = set(h_only.rows) if h_only else set()
     u4401_keys = set(u4401.rows) if u4401 else set()
     if (u4401_keys & video_keys) or (u4401_keys & h_only_keys):
-        raise w.ExportError("U44.0.1 exact source overlaps a recovery folder")
+        raise w.ExportError("Exact source patch overlaps a recovery folder")
     if video_keys & h_only_keys:
         raise w.ExportError('Overlapping recovered CDN sources')
     used_video, used_h_only, used_u4401 = set(), set(), set()
@@ -405,7 +401,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         try:
             from installed_type_resolver import evidence_for_asset
             cdn_type, type_source = w.resolve_common_header_type(
-                asset, h_type, hints, allow_bundled=allow_bundled_types,
+                asset, h_type, hints,
                 installed_type=evidence_for_asset(installed_resolver, asset, h_type),
             )
         except w.ExportError as exc:
@@ -528,7 +524,6 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
         'require_static_types': require_static_types,
         'require_complete': require_complete,
         'required_manifest_families': list(required_manifest_families),
-        'bundled_type_hints': allow_bundled_types,
         'prior_recovery_cdn_source_provided': recovered_cdn is not None,
         'prior_recovery_h_only_source_provided': recovered_h_only is not None,
         'u4401_exact_source_provided': u4401_patch is not None},
@@ -561,9 +556,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('target', type=Path, help='Untouched reference Final-U44 install')
     parser.add_argument('base', type=Path, help='Untouched original Steam base')
     parser.add_argument('--patch', type=Path, help='Already exported patch folder (optional post-export check)')
-    parser.add_argument('--recovered-cdn', type=Path, help='Validated 101-video offline source folder')
+    parser.add_argument('--recovered-cdn', type=Path, help='Validated video recovery source folder')
     parser.add_argument('--recovered-h-only', type=Path, help='Validated 2-resource offline source folder')
-    parser.add_argument('--u4401-patch', type=Path, help='Verified exact-identity U44.0.1 source; read-only, offline')
+    parser.add_argument('--u4401-patch', type=Path, help='Optional exact-identity source patch; read-only, offline')
     parser.add_argument('--deep-pieces', action='store_true', help='Decompress all required B/F cache payloads (slow)')
     parser.add_argument('--deep-patch', action='store_true', help='Validate full emitted CDN payloads, CRC32C and SHCC H/B/F')
     parser.add_argument('--max-examples', type=int, default=100)
@@ -571,11 +566,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--manifest-type', type=w._parse_manifest_type, default=0xE)
     parser.add_argument('--type-evidence', type=Path, help='Optional external exact-hash type evidence JSON')
     parser.add_argument('--allow-cross-version-types', action='store_true')
-    parser.add_argument('--no-bundled-type-hints', action='store_true')
     parser.add_argument('--static-type-recovery', action='store_true',
         help='recover native CDN type IDs from verified installed EXE and Packages.bin')
     parser.add_argument('--require-static-types', action='store_true',
-        help='require static type recovery and five pinned type preflights')
+        help='require verified installed native/Packages type recovery')
     parser.add_argument('--required-manifest-family', action='append', default=[], metavar='/B.Cache.NAME.bin',
         help='require this exact H.Cache-listed family; repeat for explicitly audited installed configuration')
     parser.add_argument('--require-complete', action='store_true',
@@ -595,7 +589,6 @@ def main(argv: list[str] | None = None) -> int:
             deep_pieces=args.deep_pieces, deep_patch=args.deep_patch,
             max_examples=args.max_examples, progress=args.progress, manifest_type=args.manifest_type,
             type_evidence_path=args.type_evidence, allow_cross_version_types=args.allow_cross_version_types,
-            allow_bundled_types=not args.no_bundled_type_hints,
             static_type_recovery=args.static_type_recovery or args.require_static_types,
             require_static_types=args.require_static_types,
             require_complete=args.require_complete,

@@ -237,7 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--timeout', type=float, default=20, help='GET timeout per request, seconds (default 20)')
     args = parser.parse_args(argv)
     try:
-        if not 1 <= args.limit <= 101 or not 1 <= args.timeout <= 120:
+        if not 1 <= args.limit <= 512 or not 1 <= args.timeout <= 120:
             raise w.ExportError('Invalid --limit or --timeout')
         report_path = args.cdn_report.resolve(strict=True)
         report = json.loads(report_path.read_text(encoding='utf-8'))

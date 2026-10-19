@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""One-run, clean-source U44.0.0 EN/DX11 reconstruction and verification.
+"""One-run, clean-source Warframe patch reconstruction and verification.
 
 Always creates a fresh, isolated work directory. Never reads previous recovery
 reports or old patch exports. Only original installed manifests decide the
 output membership. No runtime-log/525 forced-unchanged entries are imported.
 
-Up to THREE original U44.0.0 historical CDN objects are downloaded from their
-pinned canonical URLs; exactly 100 other missing source objects are validated
-against their matching identities in the separately supplied U44.0.1 patch.
-This is NOT an installation-only exporter for these 103 absent source objects.
+Absent objects are identified from the installed manifests, checked against
+an optional exact source patch, then recovered from the manifest-addressed CDN
+when needed. No hardcoded object hashes or expected recovery counts are used.
 """
 from __future__ import annotations
 
@@ -34,11 +33,11 @@ import traceback
 import uuid
 
 import common as fingerprint
-import compare_u4401_sources as compare_u4401
+import compare_sources as compare_u4401
 import export_transaction as tx
 import offline_patch_audit as offline
-import recover_u4400_last_three as historical
-import restore_u44_complete as restore
+import recover_manifest_sources as historical
+import source_inventory as restore
 import warframe_install_to_patch as w
 import stripped_archive
 
@@ -135,21 +134,21 @@ def fetch_original_h_cache(build_label: str, *, timeout: float, retries: int = 5
     raise AssertionError('Unreachable H.Cache retry state')
 
 PROJECT = Path(__file__).resolve().parent
-SCOPE = restore.REQUIRED_FAMILIES
-MANIFEST_TYPE = 0xE  # Installed U44.0.0 H.Cache/B.Cache CDN metadata type.
+MANIFEST_TYPE = 0xE  # H.Cache/B.Cache CDN metadata type.
 
-def export_arguments(videos: Path, honly: Path, comparison_file: Path,
-        u4401: Path, output: Path, failures: list[dict]) -> dict:
+def export_arguments(videos: Path | None, honly: Path | None, comparison_file: Path | None,
+        u4401: Path | None, output: Path, failures: list[dict],
+        required_families: tuple[str, ...] = (), require_static_types: bool = False) -> dict:
     """One source of truth for the direct export_patch() API contract."""
     return dict(manifest_type=MANIFEST_TYPE, dry_run=False, require_complete=False,
         recovered_cdn_dir=videos, recovered_h_only_dir=honly,
-        u4401_patch=u4401, u4401_report=comparison_file,
-        required_manifest_families=SCOPE,
-        static_type_recovery=True, require_static_types=True,
-        allow_bundled_types=False, published_output_root=output,
+        u4401_patch=u4401, u4401_report=comparison_file if u4401 is not None else None,
+        required_manifest_families=required_families,
+        static_type_recovery=True, require_static_types=require_static_types,
+        published_output_root=output,
         failure_collector=failures)
 
-def validate_export_contract(target: Path, base: Path, u4401: Path,
+def validate_export_contract(target: Path, base: Path, u4401: Path | None,
         workspace: Path, output: Path) -> None:
     """Fail before source scans/downloads if the one-click exporter API drifted."""
     args = export_arguments(workspace / 'recovered-videos',
@@ -171,11 +170,11 @@ from common import PlainLogTee as Tee, error as print_error, warning as print_wa
 def write_json(path: Path, data: dict) -> None:
     restore.save_report(path, data)
 
-def validate_roots(target: Path, base: Path, u4401: Path, output: Path,
+def validate_roots(target: Path, base: Path, u4401: Path | None, output: Path,
         workspace: Path, report_dir: Path) -> None:
-    sources = [x.resolve(strict=True) for x in (target, base, u4401)]
-    if len(set(sources)) != 3 or not all(x.is_dir() for x in sources):
-        raise CleanRunError('Target, original Steam base and U44.0.1 patch must be three distinct directories')
+    sources = [x.resolve(strict=True) for x in (target, base, u4401) if x is not None]
+    if len(set(sources)) != len(sources) or not all(x.is_dir() for x in sources):
+        raise CleanRunError('Target, Steam base and optional source patch must be distinct directories')
     writable = [x.resolve(strict=False) for x in (output, workspace, report_dir)]
     if any(a == b or a.is_relative_to(b) or b.is_relative_to(a)
            for i, a in enumerate(sources) for b in sources[i+1:]):
@@ -189,7 +188,7 @@ def validate_roots(target: Path, base: Path, u4401: Path, output: Path,
                for other in writable[i+1:]):
             raise CleanRunError('Output, recovery workspace and reports directories must not overlap')
     if any(path.is_symlink() for path in (target, base, u4401, output.parent,
-            workspace.parent, report_dir.parent)):
+            workspace.parent, report_dir.parent) if path is not None):
         raise CleanRunError('Root directory symlink detected; refusing unsafe reconstruction')
     if output.exists() or output.is_symlink():
         raise CleanRunError(f'Fresh output already exists; refusing to overwrite: {output}')
@@ -197,16 +196,11 @@ def validate_roots(target: Path, base: Path, u4401: Path, output: Path,
         if not w.find_cache_windows_dir(source).is_dir():
             raise CleanRunError(f'Missing Cache.Windows in required source: {source}')
     w._find_target_exe(target)
-    compare_u4401.safe_patch_content(u4401)
+    if u4401 is not None:
+        compare_u4401.safe_patch_content(u4401)
     if workspace.exists() or workspace.is_symlink():
         raise CleanRunError(f'Fresh workspace already exists; refusing to reuse: {workspace}')
-    # Avoid wasting a download on the last historical filename's MAX_PATH limit.
-    for name, (digest, _size, type_id) in historical.PINNED.items():
-        recovered = w._safe_output_path(
-            workspace / historical.RECOVERY_DIR /
-            ('recovered-videos' if type_id == 0xAA else 'recovered-h-only') /
-            'OpenWF' / 'Content', '0', name, type_id, digest)
-        w._validate_windows_export_path(recovered, atomic=True)
+    # Recovery object paths are checked from the actual manifest inventory.
 
 def snapshot_target_executable(target: Path) -> dict:
     """Fingerprint the actual executable used to resolve installed type IDs."""
@@ -301,11 +295,13 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
         run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
     workspace = work_parent / run_id
     report_dir = report_root / run_id
-    output = getattr(args, 'output', None) or (args.output_parent / f'44.0.0-{run_id}')
+    output = getattr(args, 'output', None) or (args.output_parent / f'Warframe-{run_id}')
     # The report root is independently protected even when an input is missing
     # or another preflight check fails, so failed initialization has a JSON log.
     report_real = report_dir.resolve(strict=False)
     for source in (target, base, u4401):
+        if source is None:
+            continue
         protected = source.resolve(strict=False)
         if report_real == protected or report_real.is_relative_to(protected) or protected.is_relative_to(report_real):
             raise CleanRunError(f'Report folder overlaps a protected input: {source}')
@@ -316,17 +312,16 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
     report_dir.mkdir(parents=True, exist_ok=False)
     report_log = report_dir / 'clean-run-console.log'
     workflow = {
-        'version': w.VERSION, 'kind': 'one-click-clean-u4400-rebuild',
+        'version': w.VERSION, 'kind': 'manifest-driven-patch-rebuild',
         'run_id': run_id, 'status': 'started', 'phase': 'init',
         'reference': str(target), 'steam_base': str(base),
-        'u4401_exact_source': str(u4401), 'patch_output': str(output),
-        'report_folder': str(report_dir), 'network': 'three pinned CDN URLs plus optional exact-label original H.Cache lookup',
+        'exact_source_patch': str(u4401) if u4401 is not None else None, 'patch_output': str(output),
+        'report_folder': str(report_dir), 'network': 'manifest-addressed CDN URLs plus optional H.Cache lookup',
         'sources_from_failed_runs': False, 'force_unchanged_runtime_resources': False,
         'all_stripped': bool(getattr(args, 'all_stripped', False)),
-        'scope': list(SCOPE), 'limitations': [
-            'The final patch must still be tested on a NEW clean Steam-base copy in-game.',
-            '100 assets are reused only from exact-identity verified U44.0.1 patch objects; '
-            'three are recovered from exact historical CDN URLs. This is not yet installation-only.'
+        'scope': [], 'limitations': [
+            'Patch application must be verified against its original Steam base.',
+            'Missing objects require exact validated sources; installation-only recovery is not guaranteed.'
         ],
     }
     workspace_created = False
@@ -337,14 +332,17 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
             try:
                 workflow['phase'] = 'validate-inputs'
                 validate_roots(target, base, u4401, output, workspace, report_dir)
-                print(f'[Clean] Original final U44.0.0: {target}')
+                print(f'[Clean] Untouched final installation: {target}')
                 print(f'[Clean] Original Steam base: {base}')
-                print(f'[Clean] Independent exact-match U44.0.1 source: {u4401}')
+                if u4401 is not None:
+                    print(f'[Clean] Exact recovery source patch: {u4401}')
+                else:
+                    print('[Clean] No source patch supplied; trying manifest-identical CDN objects')
                 print(f'[Clean] New isolated recovery workspace: {workspace}')
                 print(f'[Clean] Fresh final patch destination: {output}')
                 print(f'[Clean] Permanent reports: {report_dir}')
-                print('[Clean] Old 525 runtime requests, old recovered assets and previous exports: NEVER USED')
-                print('[Network] Three pinned historical objects; optional exact-label original H.Cache lookup.')
+                print('[Clean] Fresh manifest inventory; no prior recovery reports used')
+                print('[Network] Manifest-addressed recovery; optional original H.Cache lookup.')
                 workflow['phase'] = 'verify-installed-dependencies'
                 needed = ('pefile', 'capstone', 'numpy')
                 missing = [module for module in needed if importlib.util.find_spec(module) is None]
@@ -372,34 +370,56 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 # This directory is freshly created, with no reports or previous recovery content.
                 if list(workspace.iterdir()):
                     raise CleanRunError('Fresh workspace is unexpectedly nonempty')
-                workflow['phase'] = 'fresh-source-inventory-and-three-recovery'
+                workflow['phase'] = 'manifest-source-recovery'
                 recovery = historical.run(workspace, download=True, timeout=args.cdn_timeout,
                     oodle=oodle, retries=args.cdn_retries,
                     fresh_sources=(target, base, u4401))
-                if recovery['summary'].get('fully_verified') != 3:
-                    raise CleanRunError('Three exact historical objects not fully recovered; no patch will be exported')
-                comparison_file = workspace / f'u44-0-1-shared-assets-v{w.VERSION}.json'
+                required = recovery['summary']['required']
+                recovered = recovery['summary']['fully_verified']
+                if recovered != required:
+                    raise CleanRunError(f'Only {recovered}/{required} missing CDN objects recovered; refusing publication')
+                comparison_file = workspace / historical.COMPARISON_REPORT
                 source_comparison = json.loads(comparison_file.read_text(encoding='utf-8'))
                 totals = source_comparison['summary']
-                if (totals.get('required_missing_u44_objects') != 103
-                        or totals.get('exact_objects_verified') != 100
-                        or totals.get('exact_objects_absent') != 3
-                        or totals.get('exact_objects_rejected') != 0):
-                    raise CleanRunError('Independent U44.0.1 source inventory is incomplete or has unexpected differences')
-                videos = workspace / historical.RECOVERY_DIR / 'recovered-videos'
-                honly = workspace / historical.RECOVERY_DIR / 'recovered-h-only'
-                if not all(x.is_dir() for x in (videos, honly)):
-                    raise CleanRunError('Fresh recovered source folders missing after validation')
+                verified_source = totals.get('exact_objects_verified')
+                if (totals.get('exact_objects_rejected') != 0
+                        or totals.get('exact_objects_absent') != required
+                        or not isinstance(verified_source, int)
+                        or totals.get('required_missing_objects') != verified_source + required):
+                    raise CleanRunError('Source comparison or manifest inventory is incomplete')
+                video_dir = workspace / historical.RECOVERY_DIR / 'recovered-videos'
+                h_only_dir = workspace / historical.RECOVERY_DIR / 'recovered-h-only'
+                videos = video_dir if video_dir.is_dir() else None
+                honly = h_only_dir if h_only_dir.is_dir() else None
+                if (videos is None and any(x['status'] in ('recovered-validated', 'already-verified-locally')
+                        and x.get('cdn_type_hex') == 'AA' for x in recovery['objects'])):
+                    raise CleanRunError('Verified video recovery folder is missing')
+                if (honly is None and any(x['status'] in ('recovered-validated', 'already-verified-locally')
+                        and x.get('cdn_type_hex') != 'AA' for x in recovery['objects'])):
+                    raise CleanRunError('Verified H-only recovery folder is missing')
+                print(f'[Recovery] {verified_source} exact objects from source patch; '
+                    f'{recovered} manifest-addressed CDN objects')
+                inventory_report = json.loads((workspace / f'missing-source-v{w.VERSION}.json').read_text(encoding='utf-8'))
+                declared = inventory_report.get('summary', {}).get('available_manifest_families')
+                if not isinstance(declared, list) or not declared:
+                    raise CleanRunError('No verifiable installed B.Cache families')
+                families = tuple(entry['path'] for entry in declared)
+                if len(set(families)) != len(families) or any(
+                        not w.H_CACHE_B_CACHE_RE.fullmatch(name) for name in families):
+                    raise CleanRunError('Duplicate or invalid installed B.Cache family')
+                workflow['scope'] = list(families)
+                from installed_type_resolver import KNOWN_EXE_HASHES
+                require_native = baseline_exe['sha256'] in KNOWN_EXE_HASHES
+                workflow['strict_native_type_evidence'] = require_native
                 check_source_unchanged(target, base, before, report_dir, 'after-recovery', args.full_source_hash)
                 check_target_executable(target, baseline_exe, report_dir, 'after-recovery')
 
                 common = dict(target=target, base=base,
                     manifest_type=MANIFEST_TYPE, require_complete=False,
                     recovered_cdn=videos, recovered_h_only=honly,
-                    u4401_patch=u4401, u4401_report=comparison_file,
-                    required_manifest_families=SCOPE,
-                    static_type_recovery=True, require_static_types=True,
-                    allow_bundled_types=False)
+                    u4401_patch=u4401, u4401_report=comparison_file if u4401 is not None else None,
+                    required_manifest_families=families,
+                    static_type_recovery=True, require_static_types=require_native)
                 pre_path = workspace / 'offline-patch-audit-preexport.json'
                 post_path = workspace / 'offline-patch-audit-postexport.json'
                 def preflight() -> bool:
@@ -415,7 +435,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                     workflow['phase'] = 'reconstruction'
                     result = w.export_patch(target, base, stage,
                         **export_arguments(videos, honly, comparison_file,
-                        u4401, output, failures))
+                        u4401, output, failures, families, require_native))
                     if result != 0:
                         return result
                     explicit = getattr(args, 'h_cache_build_label', None)
@@ -475,7 +495,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                             allow_cdn=getattr(args, 'stripped_cdn_fallback', False),
                             timeout=args.cdn_timeout, retries=args.cdn_retries,
                             full_source_hash=args.full_source_hash,
-                            source_patches=(u4401,), attempt_history=attempts)
+                            source_patches=(u4401,) if u4401 is not None else (), attempt_history=attempts)
                         # The normal deep audit ran before enrichment. New files
                         # receive per-object structural verification by the
                         # stripped archive stage, including verification after
@@ -502,7 +522,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 workflow['phase'] = 'transactional-export'
                 code = tx.execute(final_output=output, diagnostics_dir=workspace, version=w.VERSION,
                     preflight=preflight, export=export, verify=verify,
-                    protected_sources=(target, base, u4401, videos, honly),
+                    protected_sources=tuple(x for x in (target, base, u4401, videos, honly) if x is not None),
                     preflight_report=pre_path, post_audit_report=post_path,
                     keep_failed_output=args.keep_failed_output)
                 if code != 0:
@@ -553,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = StrictArgumentParser(description=__doc__)
     parser.add_argument('--target', type=Path, required=True)
     parser.add_argument('--base', type=Path, required=True)
-    parser.add_argument('--u4401', type=Path, required=True)
+    parser.add_argument('--u4401', type=Path)
     parser.add_argument('--output-parent', type=Path, required=True)
     parser.add_argument('--work-parent', type=Path,
         help='optional SHORT temporary parent directory (default: <target drive>\\WF-Rebuild)')

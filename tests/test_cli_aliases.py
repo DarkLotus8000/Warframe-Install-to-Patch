@@ -125,13 +125,13 @@ class TestReleaseMetadata(unittest.TestCase):
         import common
         import recover_missing_cdn
         import recover_remaining_h_only
-        import recover_u4400_last_three
+        import recover_manifest_sources
 
         self.assertEqual(common.VERSION, "0.1")
         for version in (common.VERSION, exporter.VERSION,
                 recover_missing_cdn.RECOVERY_REPORT_FORMAT,
                 recover_remaining_h_only.VERSION,
-                recover_u4400_last_three.VERSION):
+                recover_manifest_sources.VERSION):
             self.assertEqual(version, '0.1')
         self.assertEqual(recover_remaining_h_only.REPORT_NAME,
             'cdn-h-only-recovery-v0.1.json')
@@ -216,7 +216,7 @@ class TestHCacheRetryPolicy(unittest.TestCase):
 
     def test_transient_http_and_connection_errors_retry(self):
         from urllib.error import HTTPError, URLError
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         class Response:
             def __enter__(self): return self
             def __exit__(self, *args): return False
@@ -238,7 +238,7 @@ class TestHCacheRetryPolicy(unittest.TestCase):
 
     def test_not_found_does_not_retry(self):
         from urllib.error import HTTPError
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         class Opener:
             calls = 0
             def open(self, req, timeout):
@@ -252,7 +252,7 @@ class TestHCacheRetryPolicy(unittest.TestCase):
 
     def test_permanent_http_does_not_retry_and_network_is_bounded(self):
         from urllib.error import HTTPError, URLError
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         class Opener:
             def __init__(self, code): self.code = code; self.calls = 0
             def open(self, req, timeout):
@@ -269,7 +269,7 @@ class TestHCacheRetryPolicy(unittest.TestCase):
         self.assertEqual(o.calls, 3)
 
     def test_corrupted_200_response_retries_before_acceptance(self):
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         import warframe_install_to_patch as w
         class Response:
             def __init__(self, payload): self.payload = payload
@@ -294,7 +294,7 @@ class TestHCacheRetryPolicy(unittest.TestCase):
         self.assertEqual(pauses, [1])
 
     def test_persistent_invalid_http_200_fails_closed(self):
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         import warframe_install_to_patch as w
         class Response:
             def __enter__(self): return self
@@ -316,7 +316,7 @@ class TestHCacheRetryPolicy(unittest.TestCase):
         self.assertEqual(o.calls, 3)
 
     def test_invalid_retry_count_rejected(self):
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         for n in (0, 21):
             with self.assertRaises(ValueError):
                 rebuild.fetch_original_h_cache(self.LABEL, timeout=5, retries=n)
@@ -377,15 +377,14 @@ class TestSourceFormatting(unittest.TestCase):
 
 class TestInternalCliErrors(unittest.TestCase):
     SCRIPTS = (
-        'compare_u4401_sources.py',
+        'compare_sources.py',
         'inspect_missing_source.py',
         'inspect_unresolved_content.py',
         'offline_patch_audit.py',
-        'rebuild_pristine_u4400.py',
+        'rebuild_patch.py',
         'recover_missing_cdn.py',
         'recover_remaining_h_only.py',
-        'recover_u4400_last_three.py',
-        'restore_u44_complete.py',
+        'recover_manifest_sources.py',
         'warframe_install_to_patch.py',
     )
 

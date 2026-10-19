@@ -115,31 +115,6 @@ class TypeEvidence:
     type_id: int
     strength: str
 
-# The current U44.0.0 cache does not expose a conventional CommonHeader type
-# field for some opaque mission-reward resources. These are deliberately
-# *hash-locked* observations, never general path-based guesses. They allow a
-# repeatable U44 export without an external JSON file, but they are NOT locally
-# inferred type IDs and must not be extrapolated to other manifest hashes.
-#
-# Historical provenance: the first three IDs came from exact-hash CDN
-# filenames; the last two came from two cross-version same-path observations.
-# The U44.0.0 Phase 7 installed EXE + Packages.bin probe has now independently
-# confirmed all five as type 0xA. Native recovery runs first when available;
-# these old hash-locked hints are retained only for regression and fallback.
-# No reference patch is opened by the exporter to use this registry.
-_BUILTIN_U44_TYPES: dict[tuple[str, str, str], TypeEvidence] = {
-    ("0", "/Lotus/Types/Game/MissionDecks/ZarimanMissionRewards/VoidArmageddonRewards", "PAhNmPO2SWPHQHyv4N1UOg"):
-        TypeEvidence(0xA, "bundled-exact-hash"),
-    ("0", "/Lotus/Types/Game/MissionDecks/ZarimanMissionRewards/VoidCascadeRewards", "fKW7u-ZM2ZGT7ihxhqNrzg"):
-        TypeEvidence(0xA, "bundled-exact-hash"),
-    ("0", "/Lotus/Types/Game/MissionDecks/ZarimanMissionRewards/VoidFloodRewards", "K3Vh5kNhRO-pPql-dby6NA"):
-        TypeEvidence(0xA, "bundled-exact-hash"),
-    ("0", "/Lotus/Types/Game/MissionDecks/ZarimanMissionRewards/ZarimanExterminateRewards", "A7+V8aXY9YmaL0I35YVgvQ"):
-        TypeEvidence(0xA, "bundled-cross-version"),
-    ("0", "/Lotus/Types/Game/MissionDecks/ZarimanMissionRewards/ZarimanMobileDefenseRewards", "6QShu4QeqkE-8jm0yBPRaQ"):
-        TypeEvidence(0xA, "bundled-cross-version"),
-}
-
 # U44 DX11 .hlsl asset requests from the live Warframe client were compared
 # with the exact matching H hashes in the installed cache and the emitted CDN
 # filenames. The same content hash was requested as !27_ for H-header type
@@ -162,7 +137,6 @@ def resolve_common_header_type(
     parsed_type: int | None,
     evidence: dict[tuple[str, str, str], TypeEvidence] | None = None,
     *,
-    allow_bundled: bool = True,
     installed_type: TypeEvidence | None = None,
 ) -> tuple[int, str | None]:
     """Resolve the CDN filename type, which may differ from the H-header type.
@@ -172,12 +146,10 @@ def resolve_common_header_type(
     may also be supplied. All conflicting evidence fails closed.
     """
     key = (asset.namespace, asset.logical_path, asset.hash_b64)
-    local = _BUILTIN_U44_TYPES.get(key) if allow_bundled else None
     supplied = (evidence or {}).get(key)
     filename_type, mapping_source = _observed_cdn_filename_type(asset, parsed_type)
     reported = [("installed-cache CDN mapping" if mapping_source else "installed cache", filename_type),
         ("user evidence", supplied.type_id if supplied else None),
-        ("bundled U44", local.type_id if local else None),
         ("installed native parent", installed_type.type_id if installed_type else None)]
     types = {value for _source, value in reported if value is not None}
     if len(types) > 1:
@@ -189,8 +161,6 @@ def resolve_common_header_type(
         return installed_type.type_id, installed_type.strength
     if supplied is not None:
         return supplied.type_id, supplied.strength
-    if local is not None:
-        return local.type_id, local.strength
     raise ExportError(f"Could not recover CommonHeader type for {asset.namespace}{asset.logical_path}; "
         "the installed H entry has no recognized type, and no hash-matched evidence is available")
 
@@ -1024,6 +994,12 @@ def _manifest_namespace(logical_path: str) -> str:
         raise ExportError(f"Unexpected suffix on {kind} manifest: {logical_path}")
     return "9" if kind == "Dx11" else "A"
 
+def _validate_manifest_namespace(namespace: str) -> str:
+    """Accept only namespace identifiers produced by installed B.Cache manifests."""
+    if not isinstance(namespace, str) or not re.fullmatch(r'0(?:_[A-Za-z0-9]+)?|9|A', namespace):
+        raise ExportError(f"Invalid manifest namespace: {namespace!r}")
+    return namespace
+
 def _validate_logical_path(logical_path: str) -> tuple[str, ...]:
     if not logical_path.startswith("/") or "\\" in logical_path or "\x00" in logical_path:
         raise ExportError(f"Unsafe logical path: {logical_path}")
@@ -1301,7 +1277,6 @@ def _build_object_for_asset(
     type_evidence: dict[tuple[str, str, str], TypeEvidence] | None = None,
     cdn_references: CdnReferenceResolver | None = None,
     try_oodle_outer: bool = True,
-    allow_bundled_types: bool = True,
     installed_resolver=None,
 ) -> tuple[bytes, int, str, str | None]:
     try:
@@ -1319,7 +1294,7 @@ def _build_object_for_asset(
         )
         from installed_type_resolver import evidence_for_asset
         type_id, _source = resolve_common_header_type(
-            asset, type_id, type_evidence, allow_bundled=allow_bundled_types,
+            asset, type_id, type_evidence,
             installed_type=evidence_for_asset(installed_resolver, asset, type_id),
         )
         result = cdn_references.resolve(
@@ -1333,7 +1308,7 @@ def _build_object_for_asset(
         return obj, type_id, "reference", "cdn-reference"
     from installed_type_resolver import evidence_for_asset
     type_id, type_source = resolve_common_header_type(
-        asset, type_id, type_evidence, allow_bundled=allow_bundled_types,
+        asset, type_id, type_evidence,
         installed_type=evidence_for_asset(installed_resolver, asset, type_id),
     )
     return obj, type_id, package, type_source
@@ -1617,7 +1592,6 @@ def export_patch(
     allow_cross_version_types: bool = False,
     cdn_reference_paths: list[Path] | None = None,
     try_oodle_outer: bool = True,
-    allow_bundled_types: bool = True,
     recovered_cdn_dir: Path | None = None,
     recovered_h_only_dir: Path | None = None,
     u4401_patch: Path | None = None,
@@ -1653,12 +1627,12 @@ def export_patch(
         h_only_source = RecoveredHOnlyCollection(recovered_h_only_dir)
     u4401_source = None
     if u4401_patch is not None:
-        from recovery_imports import U4401ExactCollection
-        u4401_source = U4401ExactCollection(u4401_patch, u4401_report)
+        from recovery_imports import ExactSourceCollection
+        u4401_source = ExactSourceCollection(u4401_patch, u4401_report)
     if u4401_source is not None:
         overlap = u4401_source.rows.keys() & ((recovery_source.rows.keys() if recovery_source else set()) | (h_only_source.rows.keys() if h_only_source else set()))
         if overlap:
-            raise ExportError("U44.0.1 source overlaps an explicitly supplied recovery folder")
+            raise ExportError("Source patch overlaps an explicitly supplied recovery folder")
     if recovery_source is not None and h_only_source is not None:
         overlap = recovery_source.rows.keys() & h_only_source.rows.keys()
         if overlap:
@@ -1697,7 +1671,7 @@ def export_patch(
     if u4401_source is not None:
         for protected in (target_root, base_root, output_root.resolve()):
             if u4401_source.root == protected or u4401_source.root.is_relative_to(protected) or protected.is_relative_to(u4401_source.root):
-                raise ExportError("U44.0.1 source and target/base/output directories must not overlap")
+                raise ExportError("Source patch and target/base/output directories must not overlap")
     target_exe = _find_target_exe(target_root)
     script_dir = Path(__file__).resolve().parent
     oodle = Oodle(script_dir)
@@ -1712,9 +1686,8 @@ def export_patch(
     if h_only_source is not None:
         print(f"Recovered H-only: {h_only_source.root} ({len(h_only_source.rows):,} report assets; offline)")
     if u4401_source is not None:
-        print(f"U44.0.1 exact source: {u4401_source.root} ({len(u4401_source.rows)} validated identity candidates; offline)")
-    print(f"Type recovery  : cache headers + {'hash-locked U44 fallback' if allow_bundled_types else 'no bundled hints'}"
-          f" + {'native/Packages' if static_type_recovery else 'no native/Packages'}")
+        print(f"Exact source patch: {u4401_source.root} ({len(u4401_source.rows)} validated identity candidates; offline)")
+    print(f"Type recovery  : {'native/Packages enabled' if static_type_recovery else 'cache evidence only'}")
     if cdn_references is not None:
         print(f"CDN references : {len(cdn_references.patch_roots)} read-only patch(es)")
     if try_oodle_outer:
@@ -1912,7 +1885,7 @@ def export_patch(
     if u4401_source is not None:
         unused_u4401 = u4401_source.rows.keys() - {(a.namespace, a.logical_path) for a in u4401_imports}
         if unused_u4401:
-            raise ExportError(f"{len(unused_u4401)} U44.0.1 exact assets are not valid target/base source gaps")
+            raise ExportError(f"{len(unused_u4401)} source-patch objects are not valid target/base source gaps")
     planned_bytes = (sum(a.cdn_size for a in changed) + sum(a.cdn_size for a in recovered_imports)
         + sum(a.cdn_size for a in recovered_h_imports) + sum(a.cdn_size for a in u4401_imports))
     print(
@@ -1920,16 +1893,13 @@ def export_patch(
         f"inherited-from-base: {inherited_from_base:,} | source-unresolved: {source_missing:,} | "
         f"base-inheritance-errors: {base_inheritance_errors:,} | unknown-base: {unknown_base:,} | "
         f"FontCache proactive: {proactive_fontcache:,} | duplicate-package refresh: {proactive_duplicate_packages:,} | recovered-CDN: {len(recovered_imports):,} | "
-        f"recovered-H-only: {len(recovered_h_imports):,} | U44.0.1 exact: {len(u4401_imports):,}"
+        f"recovered-H-only: {len(recovered_h_imports):,} | source-patch exact: {len(u4401_imports):,}"
     )
     print(f"[Plan] {len(changed) + len(recovered_imports) + len(recovered_h_imports) + len(u4401_imports):,} CDN objects | {planned_bytes / (1024**2):,.1f} MiB")
     installed_resolver = None
     if static_type_recovery and (not dry_run or require_static_types):
-        from installed_type_resolver import prepare, preflight_pinned_types
+        from installed_type_resolver import prepare
         installed_resolver = prepare(target_exe, target_index, oodle, required=require_static_types)
-        if installed_resolver is not None:
-            preflight_pinned_types(installed_resolver, target_index, oodle, manifest_assets,
-                required=require_static_types)
     if dry_run:
         print("[Dry run] No output was written.")
         partial_source = bool(source_missing or missing_manifest_families)
@@ -1974,7 +1944,6 @@ def export_patch(
             obj, type_id, _package, type_source = _build_object_for_asset(
                 asset, target_index, oodle, evidence, cdn_references,
                 try_oodle_outer=try_oodle_outer,
-                allow_bundled_types=allow_bundled_types,
                 installed_resolver=installed_resolver,
             )
             path = _safe_output_path(content_root, asset.namespace, asset.logical_path, type_id, asset.hash_b64)
@@ -2040,12 +2009,12 @@ def export_patch(
             atomic_write(path, data)
             imported_u4401 += 1
         except (OSError, ExportError) as exc:
-            failures.append((asset, f'U44.0.1 exact import failed: {exc}'))
-            print_error(f'U44.0.1 exact import failed for {asset.namespace}{asset.logical_path} | {exc}')
+            failures.append((asset, f'Source-patch exact import failed: {exc}'))
+            print_error(f'Source-patch exact import failed for {asset.namespace}{asset.logical_path} | {exc}')
             if failure_collector is not None:
-                failure_collector.append({"namespace": asset.namespace, "path": asset.logical_path, "manifest_hash": asset.hash_b64, "error": f'U44.0.1 exact import failed: {exc}'})
+                failure_collector.append({"namespace": asset.namespace, "path": asset.logical_path, "manifest_hash": asset.hash_b64, "error": f'Source-patch exact import failed: {exc}'})
     if u4401_imports:
-        print(f'[U44.0.1 exact] {imported_u4401:,}/{len(u4401_imports):,} copied; no GET')
+        print(f'[Source-patch exact] {imported_u4401:,}/{len(u4401_imports):,} copied; no GET')
 
     partial_source = bool(source_missing or missing_manifest_families)
     hard_failure = bool(failures or unknown_base or base_inheritance_errors or source_missing)
@@ -2072,7 +2041,7 @@ def export_patch(
     print(f"Objects written      : {reconstructed + imported + imported_h_only + imported_u4401:,}")
     print(f"Recovered CDN imports: {imported:,}")
     print(f"Recovered H-only     : {imported_h_only:,}")
-    print(f"U44.0.1 exact imports: {imported_u4401:,}")
+    print(f"Source-patch exact imports: {imported_u4401:,}")
     print(f"Direct cache objects : {reconstructed - references_used - outer_encoded:,}")
     print(f"Outer Oodle objects  : {outer_encoded:,}")
     print(f"CDN reference copies : {references_used:,}")
@@ -2089,8 +2058,6 @@ def export_patch(
             f"(exact {evidence_used['exact-hash']}, cross-version {evidence_used['cross-version']})"
         )
     print(f"Installed native IDs : {evidence_used['installed-native-parent']:,} dynamically resolved")
-    print(f"Bundled U44 types    : {evidence_used['bundled-exact-hash'] + evidence_used['bundled-cross-version']:,} "
-          f"(exact-hash {evidence_used['bundled-exact-hash']}, cross-version {evidence_used['bundled-cross-version']})")
     print(f"DX11 shader CDN map  : {evidence_used['dx11-shader-cdn-map']:,} corrected filename types")
     print(
         "Sections             : "
@@ -2164,12 +2131,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--recovered-h-only", type=Path, metavar="DIR",
-        help="offline read-only H-only recovered CDN directory (two hash-locked U44 resources); revalidated and included in a NEW patch output",
+        help="offline read-only directory of validated H-only CDN recovery objects",
     )
     parser.add_argument("--u4401-report", type=Path, metavar="JSON",
-        help="explicit freshly generated exact U44.0.1 comparison report (clean-run mode)")
+        help="explicit freshly generated exact source-patch comparison report (clean-run mode)")
     parser.add_argument("--u4401-patch", type=Path, metavar="DIR",
-        help="read-only exact-identity U44.0.1 patch source; uses the project-local verified comparison report; no downloads")
+        help="read-only exact-identity source patch; uses the project-local verified comparison report; no downloads")
     parser.add_argument(
         "--try-oodle-outer", dest="try_oodle_outer", action="store_true", default=True,
         help="backward-compatible alias; standalone verified outer-CDN encoding is enabled by default",
@@ -2188,11 +2155,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--require-static-types", action="store_true",
-        help="require verified native/Packages extraction and all five hash-locked U44 types before writing output; fail closed",
-    )
-    parser.add_argument(
-        "--no-bundled-type-hints", dest="allow_bundled_types", action="store_false", default=True,
-        help="disable the hash-locked U44 fallback profile; installed native/Packages types remain available unless separately disabled",
+        help="require verified installed native/Packages type recovery; fail closed if unavailable",
     )
     parser.add_argument(
         "--type-evidence", type=Path, metavar="JSON",
@@ -2250,7 +2213,6 @@ def main(argv: list[str] | None = None) -> int:
         allow_cross_version_types=args.allow_cross_version_types,
         cdn_reference_paths=args.cdn_reference,
         try_oodle_outer=args.try_oodle_outer,
-        allow_bundled_types=args.allow_bundled_types,
         recovered_cdn_dir=args.recovered_cdn,
         recovered_h_only_dir=args.recovered_h_only,
         u4401_patch=args.u4401_patch,
@@ -2273,7 +2235,6 @@ def main(argv: list[str] | None = None) -> int:
             manifest_type=args.manifest_type,
             type_evidence_path=args.type_evidence,
             allow_cross_version_types=args.allow_cross_version_types,
-            allow_bundled_types=args.allow_bundled_types,
             static_type_recovery=args.static_type_recovery,
             require_static_types=args.require_static_types,
             require_complete=args.require_complete,
@@ -2320,7 +2281,6 @@ def main(argv: list[str] | None = None) -> int:
             deep_patch=True, manifest_type=args.manifest_type,
             type_evidence_path=args.type_evidence,
             allow_cross_version_types=args.allow_cross_version_types,
-            allow_bundled_types=args.allow_bundled_types,
             static_type_recovery=args.static_type_recovery,
             require_static_types=args.require_static_types,
             require_complete=args.require_complete,

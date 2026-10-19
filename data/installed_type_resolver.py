@@ -304,8 +304,7 @@ def evidence_for_asset(
     """Share the exact same native-evidence eligibility rule with the auditor."""
     if resolver is None or asset.namespace != '0':
         return None
-    key = (asset.namespace, asset.logical_path, asset.hash_b64)
-    if header_type is not None and key not in w._BUILTIN_U44_TYPES:
+    if header_type is not None:
         return None
     return resolver.get(asset.logical_path)
 
@@ -331,7 +330,7 @@ def prepare(target_exe: Path, target_index, oodle: w.Oodle, *, required: bool = 
         message = f"Optional EXE analysis dependencies missing: {', '.join(missing)}; install dependencies from requirements.txt"
         if required:
             raise w.ExportError(message)
-        print(f'[Static types] {message}; retaining hash-locked fallback behavior')
+        print(f'[Static types] {message}; using only independently verified type evidence')
         return None
     try:
         native, details = exe_native_types(target_exe)
@@ -346,47 +345,9 @@ def prepare(target_exe: Path, target_index, oodle: w.Oodle, *, required: bool = 
     except (ProbeError, w.ExportError, OSError, ValueError) as exc:
         if required:
             raise w.ExportError(f'Static type recovery failed: {exc}') from exc
-        print(f'[Static types] Recovery unavailable ({exc}); retaining hash-locked fallback behavior')
+        print(f'[Static types] Recovery unavailable ({exc}); using only independently verified type evidence')
         return None
     return InstalledTypeResolver(parents, native)
-
-def preflight_pinned_types(resolver: InstalledTypeResolver, target_index, oodle: w.Oodle,
-        manifest_assets: list[w.ManifestAsset], *, required: bool = False) -> int:
-    """Cross-check the five hash-locked hints *before* creating output.
-
-    All selected H bytes must match the manifest digest, not merely the path.
-    Native mismatches are never hidden by the legacy fallback registry.
-    """
-    count = 0
-    for asset in manifest_assets:
-        key = (asset.namespace, asset.logical_path, asset.hash_b64)
-        fallback = w._BUILTIN_U44_TYPES.get(key)
-        if fallback is None:
-            continue
-        entries = w._entries_for(target_index, asset.namespace, asset.logical_path, 'H')
-        try:
-            load_verified_h(entries, asset.hash_b64, oodle)
-        except ProbeError as exc:
-            if required:
-                raise w.ExportError(f'Static type preflight cannot verify {asset.logical_path}: {exc}') from exc
-            print(f'[Static types] Cannot confirm installed H for {asset.logical_path}: {exc}')
-            continue
-        derived = resolver.get(asset.logical_path)
-        if derived is None:
-            if required:
-                raise w.ExportError(f'Static type unresolved for {asset.logical_path}: '
-                    f"{resolver.unresolved.get(asset.logical_path)}")
-            print(f'[Static types] {asset.logical_path}: unresolved native/Packages chain; legacy fallback retained')
-            continue
-        if derived.type_id != fallback.type_id:
-            raise w.ExportError(f'Static type disagrees with bundled U44 evidence for {asset.logical_path}: '
-                f'installed 0x{derived.type_id:X}, bundled 0x{fallback.type_id:X}')
-        count += 1
-    if required and count != len(w._BUILTIN_U44_TYPES):
-        raise w.ExportError(f'Static type preflight verified {count}/{len(w._BUILTIN_U44_TYPES)} pinned U44 resources')
-    if count:
-        print(f'[Static types] {count}/{len(w._BUILTIN_U44_TYPES)} pinned CDN types verified')
-    return count
 
 # ---- Isolated PE interpreter / native CDN type scanner ----
 # Keep this specialized scanner private to the resolver module while

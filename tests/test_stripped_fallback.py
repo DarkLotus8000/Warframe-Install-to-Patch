@@ -607,7 +607,7 @@ if __name__ == '__main__':
 
 class TestOriginalHCache(unittest.TestCase):
     def setUp(self):
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         self.rebuild = rebuild
         self.header = b'pristine-h-cache-header-contents'
         self.plain = (w.SHCC_PREAMBLE
@@ -728,7 +728,7 @@ class TestReleaseWorkspaceAndRuntime(unittest.TestCase):
     def test_relative_target_uses_resolved_drive_for_default_workspace(self):
         from types import SimpleNamespace
         from unittest.mock import patch as mock_patch
-        import rebuild_pristine_u4400 as rebuild
+        import rebuild_patch as rebuild
         target = Path('nested-target-relative')
         opts = SimpleNamespace(target=target, base=Path('base'), u4401=Path('source'),
             output=Path('output'), output_parent=None)
