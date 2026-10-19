@@ -1,0 +1,5 @@
+# Required for the U44.0.0 executable type resolver and structural audits.
+google-crc32c>=1.9.0
+pefile>=2023.2.7
+capstone>=5.0.0
+numpy>=1.26

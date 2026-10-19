@@ -1,0 +1,29 @@
+# Local results and temporary work
+/logs/
+/reports/
+/recovery-*/
+.wf-stage-*/
+*.log
+
+# Generated internal audit reports (not source files)
+/data/export-result-*.json
+/data/offline-patch-audit*.json
+/data/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
