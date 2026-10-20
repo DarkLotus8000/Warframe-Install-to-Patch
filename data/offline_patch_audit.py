@@ -416,7 +416,7 @@ def audit(*, target: Path, base: Path, patch: Path | None = None,
             type_counts[type_source] += 1
         verify_file(asset, cdn_type)
     if patch_root is not None:
-        # Authenticate the full decoded H.Cache against pristine H bytes; B.Cache metadata remains byte-exact.
+        # Authenticate the full decoded H.Cache.bin against pristine H bytes; B.Cache metadata remains byte-exact.
         try:
             h_entry, _ = w._select_h_cache(ti, oodle)
             expected_metadata = [(f'H.Cache.bin!{manifest_type:X}_' + w.H_CACHE_SENTINEL_HASH,

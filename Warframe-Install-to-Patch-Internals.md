@@ -45,7 +45,7 @@ independent F-byte evidence when available.
 
 ## Original H.Cache.bin
 
-An exact OpenWF supplemental filename combines the date-only `buildLabel`
+An exact OpenWF supplemental filename combines the date-only `ProductVersion`
 from EXE VERSIONINFO with the `/B.Cache.Windows.bin` hash in installed
 `H.Cache.bin`, or uses an explicit `-H KEY`. Auto mode falls back to local reconstruction
 when the file is unavailable. An explicit label requires the download. Invalid

@@ -799,9 +799,9 @@ def build_shcc(
     return prefix + struct.pack("<I", crc32c(prefix))
 
 def verify_h_cache_metadata_object(payload: bytes, expected_header: bytes, oodle: Oodle) -> str:
-    """Verify CDN framing plus the *entire decoded* pristine H.Cache header.
+    """Verify CDN framing plus the *entire decoded* pristine H.Cache.bin header.
 
-    H.Cache has the sentinel filename, so its CDN name does not authenticate
+    H.Cache.bin has the sentinel filename, so its CDN name does not authenticate
     its contents. Recompressed originals may differ from build_shcc bytes.
     """
     if not 40 <= len(payload) <= 1024 * 1024:
@@ -828,12 +828,13 @@ def verify_h_cache_metadata_object(payload: bytes, expected_header: bytes, oodle
             raise ExportError(f'Truncated H.Cache {kind} chunk')
         codec, unpacked, stored = struct.unpack_from('<BII', plain, offset)
         offset += 9
-        if stored > len(plain) - offset or unpacked > 1024 * 1024:
+        if stored > len(plain) - offset or (kind == 'H' and unpacked > 1024 * 1024):
             raise ExportError(f'Unsafe H.Cache {kind} chunk size')
         chunk = plain[offset:offset + stored]
         offset += stored
         if kind != 'H':
-            if codec != 0 or unpacked or stored:
+            # Archived H.Cache.bin uses 0xFFFFFFFF for some empty B/F chunk sizes.
+            if codec != 0 or stored or unpacked not in (0, 0xFFFFFFFF):
                 raise ExportError('H.Cache B/F slots must be empty')
         elif codec == 0 and unpacked == stored:
             header = chunk

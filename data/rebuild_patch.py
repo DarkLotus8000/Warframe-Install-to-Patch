@@ -40,8 +40,8 @@ import source_inventory as restore
 import warframe_install_to_patch as w
 import stripped_archive
 
-# The EXE VERSIONINFO buildLabel contains only the build date. The archive
-# suffix is the B.Cache.Windows.bin manifest hash stored inside H.Cache.bin.
+# The EXE VERSIONINFO ProductVersion is the build date. The archive suffix
+# comes from the B.Cache.Windows.bin manifest hash inside H.Cache.bin.
 _BUILD_DATE = re.compile(r'20\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2}\Z')
 _H_CACHE_ARCHIVE_KEY = re.compile(r'(20\d{2}\.\d{2}\.\d{2}\.\d{2}\.\d{2})/([A-Za-z0-9+\-]{22})\Z')
 _H_CACHE_ROOT = 'https://openwf.io/supplementals/static%20data/'
@@ -53,11 +53,11 @@ class _NoRedirect(HTTPRedirectHandler):
 
 def normalize_build_date(value: str) -> str:
     if not _BUILD_DATE.fullmatch(value):
-        raise CleanRunError('Expected EXE buildLabel date YYYY.MM.DD.HH.MM')
+        raise CleanRunError('Expected EXE ProductVersion date YYYY.MM.DD.HH.MM')
     try:
         datetime.strptime(value, '%Y.%m.%d.%H.%M')
     except ValueError as exc:
-        raise CleanRunError('Invalid EXE buildLabel date') from exc
+        raise CleanRunError('Invalid EXE ProductVersion date') from exc
     return value
 
 def normalize_archive_key(value: str) -> str:
@@ -75,7 +75,7 @@ def _pe_text(value: str | bytes) -> str:
     return value.decode('utf-8', errors='replace').rstrip('\x00')
 
 def find_executable_build_date(exe: Path) -> str | None:
-    """Read the date-only buildLabel from the executable's PE VERSIONINFO."""
+    """Read the date-only ProductVersion from the executable's PE VERSIONINFO."""
     import pefile
     try:
         pe = pefile.PE(str(exe), fast_load=True)
@@ -94,7 +94,7 @@ def find_executable_build_date(exe: Path) -> str | None:
             for entry in entries:
                 for table in getattr(entry, 'StringTable', ()) or ():
                     for key, value in table.entries.items():
-                        if _pe_text(key).casefold() != 'buildlabel':
+                        if _pe_text(key).casefold() != 'productversion':
                             continue
                         try:
                             dates.add(normalize_build_date(_pe_text(value)))
@@ -121,7 +121,7 @@ def h_cache_url(archive_key: str) -> str:
 
 def fetch_original_h_cache(archive_key: str, *, timeout: float, retries: int = 5,
         opener=None, sleeper=None, verify_func=None) -> tuple[bytes | None, dict]:
-    """Fetch one exact archived H.Cache, retrying only transient failures."""
+    """Fetch one exact archived H.Cache.bin, retrying only transient failures."""
     if not 1 <= retries <= 20:
         raise ValueError('H.Cache retries must be between 1 and 20')
     url = h_cache_url(archive_key)
@@ -171,7 +171,7 @@ def fetch_original_h_cache(archive_key: str, *, timeout: float, retries: int = 5
     raise AssertionError('Unreachable H.Cache retry state')
 
 PROJECT = Path(__file__).resolve().parent
-MANIFEST_TYPE = 0xE  # H.Cache/B.Cache CDN metadata type.
+MANIFEST_TYPE = 0xE  # H.Cache.bin/B.Cache CDN metadata type.
 
 def export_arguments(videos: Path | None, honly: Path | None, comparison_file: Path | None,
         u4401: Path | None, output: Path, failures: list[dict],
@@ -485,7 +485,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                     archive_key = (normalize_archive_key(explicit) if explicit else
                         original_h_cache_archive_key(w._find_target_exe(target), expected_h))
                     if archive_key is None:
-                        print('[H.Cache] No unique EXE VERSIONINFO buildLabel; keeping local reconstruction')
+                        print('[H.Cache] No unique EXE VERSIONINFO ProductVersion; keeping local reconstruction')
                         workflow['original_h_cache'] = {'status': 'not-resolved', 'source': 'local'}
                         return result
                     if not explicit:

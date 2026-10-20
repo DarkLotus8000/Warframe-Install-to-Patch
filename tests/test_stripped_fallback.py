@@ -703,7 +703,7 @@ class TestOriginalHCache(unittest.TestCase):
             exe.write_bytes(b'placeholder')
             class FakePE:
                 def __init__(self, date_value):
-                    entries = {b'FileVersion': b'1.0.0.0', b'buildLabel': date_value}
+                    entries = {b'FileVersion': b'2026.9.22.16', b'buildLabel': b'other', b'ProductVersion': date_value}
                     self.FileInfo = [[SimpleNamespace(StringTable=[SimpleNamespace(entries=entries)])]]
                 def parse_data_directories(self, **kwargs):
                     pass
@@ -731,14 +731,14 @@ class TestOriginalHCache(unittest.TestCase):
                 with self.assertRaises(w.ExportError):
                     self.rebuild.original_h_cache_archive_key(exe, duplicate)
 
-    def test_no_multiple_buildlabel_values_or_date_only_as_archive_key(self):
+    def test_no_multiple_productversion_values_or_date_only_as_archive_key(self):
         from unittest.mock import patch as mock_patch
         from types import SimpleNamespace
         pefile = SimpleNamespace(DIRECTORY_ENTRY={'IMAGE_DIRECTORY_ENTRY_RESOURCE': 2},
             PEFormatError=type('PEFormatError', (Exception,), {}))
         entries = [
-            SimpleNamespace(entries={b'buildLabel': b'2026.09.22.16.46'}),
-            SimpleNamespace(entries={b'buildLabel': b'2026.10.01.11.30'}),
+            SimpleNamespace(entries={b'ProductVersion': b'2026.09.22.16.46'}),
+            SimpleNamespace(entries={b'ProductVersion': b'2026.10.01.11.30'}),
         ]
         class FakePE:
             FileInfo = [[SimpleNamespace(StringTable=entries)]]
@@ -749,6 +749,22 @@ class TestOriginalHCache(unittest.TestCase):
             self.assertIsNone(self.rebuild.find_executable_build_date(Path('placeholder.exe')))
         with self.assertRaises(self.rebuild.CleanRunError):
             self.rebuild.normalize_archive_key('2026.09.22.16.46')
+
+    def test_exe_versioninfo_requires_productversion(self):
+        from unittest.mock import patch as mock_patch
+        from types import SimpleNamespace
+        pefile = SimpleNamespace(DIRECTORY_ENTRY={'IMAGE_DIRECTORY_ENTRY_RESOURCE': 2},
+            PEFormatError=type('PEFormatError', (Exception,), {}))
+        class FakePE:
+            FileInfo = [[SimpleNamespace(StringTable=[SimpleNamespace(entries={
+                b'FileVersion': b'2026.9.22.16',
+                b'buildLabel': b'2026.09.22.16.46',
+            })])]]
+            def parse_data_directories(self, **kwargs): pass
+            def close(self): pass
+        with mock_patch.dict(sys.modules, {'pefile': pefile}), \
+             mock_patch.object(pefile, 'PE', return_value=FakePE(), create=True):
+            self.assertIsNone(self.rebuild.find_executable_build_date(Path('placeholder.exe')))
 
     def test_exact_http_download_and_missing_and_oversize(self):
         from urllib.error import HTTPError
