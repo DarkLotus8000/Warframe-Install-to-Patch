@@ -1209,6 +1209,8 @@ def try_encode_outer_oodle(
     The direct SHCC object has a locally constructed 5-byte 0x52/CRC32C
     trailer; CDN outer streams instead compress the preceding SHCC bytes.
     Both the Oodle round-trip and the final manifest length are mandatory.
+    The first Oodle block can be stored raw (0xCC) instead of compressed
+    (0x8C); validate the codec through Oodle rather than its first byte.
     A different format, DLL result, or CDN length is never silently accepted.
     """
     if not direct_shcc.startswith(SHCC_PREAMBLE):
@@ -1222,7 +1224,7 @@ def try_encode_outer_oodle(
     plain = direct_shcc[:-5]
     codec, level = OODLE_OUTER_PROFILE
     prefix = oodle.compress(plain, codec, level)
-    if len(prefix) + 9 != expected_cdn_size or not prefix.startswith(b"\x8c"):
+    if len(prefix) + 9 != expected_cdn_size:
         return None
     actual_codec, independent = oodle.identify_compressed_stream(prefix)
     if (actual_codec, independent) != (codec, True):
