@@ -143,19 +143,32 @@ class PlainLogTee:
 
 SELECTED = {'Font', 'ShaderDx11', 'ShaderPermutationDx11', 'Misc'}
 
-def sha256(path: Path) -> str:
+def sha256(path: Path, *, progress: bool = False) -> str:
     h = hashlib.sha256()
+    total = path.stat().st_size if progress else 0
+    done = 0
+    last = time.monotonic()
+    if progress:
+        print(f'[Fingerprint] {path} | 0/{total:,} bytes', flush=True)
     with path.open('rb') as stream:
         for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b''):
             h.update(chunk)
+            done += len(chunk)
+            if progress and time.monotonic() - last >= 5:
+                print(f'[Fingerprint] {path.name} | {done:,}/{total:,} bytes', flush=True)
+                last = time.monotonic()
+    if progress:
+        print(f'[Fingerprint] {path.name} | {done:,}/{total:,} bytes complete', flush=True)
     return h.hexdigest()
 
-def snapshot(root: Path, *, all_cache: bool = False) -> dict:
+def snapshot(root: Path, *, all_cache: bool = False, progress: bool = False) -> dict:
     root = root.resolve(strict=True)
     cache = root if root.name.casefold() == 'cache.windows' else root / 'Cache.Windows'
     if not cache.is_dir() or cache.is_symlink():
         raise ValueError(f'Cannot find safe Cache.Windows: {cache}')
     records = {}
+    if progress:
+        print(f'[Fingerprint] Scanning {cache}', flush=True)
     for path in sorted(cache.rglob('*')):
         if not path.is_file():
             continue
@@ -168,9 +181,13 @@ def snapshot(root: Path, *, all_cache: bool = False) -> dict:
         should_hash = (path.suffix.lower() == '.toc' or all_cache or
             any(f'.{package}.cache' in path.name for package in SELECTED))
         records[rel] = {'size': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
-            'sha256': sha256(path) if should_hash else None}
+            'sha256': sha256(path, progress=progress and stat.st_size >= 64 * 1024 * 1024) if should_hash else None}
     if not records or not any(k.lower().endswith('.toc') for k in records):
         raise ValueError(f'No cache TOCs found: {cache}')
+    if progress:
+        hashed = [r for r in records.values() if r['sha256'] is not None]
+        print(f'[Fingerprint] {len(hashed)} files hashed, '
+            f'{sum(r["size"] for r in hashed):,} bytes | {cache}', flush=True)
     return {'kind': 'warframe-cache-fingerprint', 'version': VERSION,
             'generated_utc': datetime.now(timezone.utc).isoformat(),
             'cache': str(cache), 'all_cache_hashed': bool(all_cache),

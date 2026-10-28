@@ -35,6 +35,10 @@ def parser() -> StrictArgumentParser:
         help='Untouched original Steam base')
     p.add_argument('-u', '--source-patch', '--u4401', dest='u4401', type=Path,
         help='Optional exact-identity source patch; unavailable objects are attempted through original CDN URLs')
+    p.add_argument('--local-assets', type=Path,
+        help='Read-only asset folder; validate matching files before CDN fallback')
+    p.add_argument('--offline', action='store_true',
+        help='Disable all network recovery and H.Cache lookup; keep missing objects unresolved')
     output = p.add_mutually_exclusive_group(required=True)
     output.add_argument('-P', '--output-parent', type=Path,
         help='Parent directory for a uniquely named new patch')
@@ -107,6 +111,8 @@ def consolidate_logs(logs: Path, run_id: str, exit_code: int, fatal: str | None 
         'status': workflow.get('status', 'failed') if isinstance(workflow, dict) else 'failed',
         'output': workflow.get('patch_output') if isinstance(workflow, dict) else None,
         'failure': fatal,
+        'recovery_summary': workflow.get('recovery_summary') if isinstance(workflow, dict) else None,
+        'unresolved_objects': workflow.get('unresolved_objects', []) if isinstance(workflow, dict) else [],
         'console_log': str(console),
         'details': evidence,
     }
@@ -137,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
         p.error('--cdn-timeout must be between 1 and 120 seconds')
     if opts.stripped_cdn_fallback and not opts.all_stripped:
         p.error('--stripped-cdn-fallback requires --all-stripped')
+    if opts.offline and (opts.stripped_cdn_fallback or opts.h_cache_build_label):
+        p.error('--offline conflicts with --stripped-cdn-fallback and --h-cache-archive-key')
     if opts.h_cache_build_label is not None:
         try:
             core.normalize_archive_key(opts.h_cache_build_label)

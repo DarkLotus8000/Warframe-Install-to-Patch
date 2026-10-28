@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import base64
 import sys
 
 from common import StrictArgumentParser, fetch_verified, error as print_error
@@ -158,10 +159,22 @@ def _collection_reports(project: Path, rows: list[dict], successes: dict) -> Non
 
 def run(project: Path, *, download: bool, timeout: float = 20.0,
         head_func=None, get_func=None, oodle=None,
-        fresh_sources: tuple[Path, Path, Path | None] | None = None, retries: int = 5) -> dict:
+        fresh_sources: tuple[Path, Path, Path | None] | None = None, retries: int = 5,
+        local_assets: Path | None = None, offline: bool = False) -> dict:
     if not 1 <= timeout <= 120 or not 1 <= retries <= 20:
         raise w.ExportError('Timeout/retry parameters outside safe limits')
     project = project.resolve(strict=True)
+    for source in (fresh_sources or ()):
+        if source is not None:
+            source = source.resolve(strict=True)
+            if project == source or project.is_relative_to(source) or source.is_relative_to(project):
+                raise w.ExportError('Recovery workspace must not overlap input sources')
+    local = None
+    if local_assets is not None:
+        from local_asset_source import LocalAssetSource
+        local = LocalAssetSource(local_assets)
+        if project == local.root or project.is_relative_to(local.root) or local.root.is_relative_to(project):
+            raise w.ExportError('Recovery workspace must not overlap local assets')
     if fresh_sources is not None:
         target, base, source_patch = fresh_sources
         _, missing = inventory.load_manifest_inventory(target, base, project)
@@ -169,7 +182,7 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
         comparison = compare_source.compare(missing, source_patch, oodle)
         inventory.save_report(project / COMPARISON_REPORT, comparison)
         rows = _report_inputs(project)
-        peers = _peer_candidates(target, rows, oodle)
+        peers = {} if offline else _peer_candidates(target, rows, oodle)
     else:
         rows = _report_inputs(project)
         peers = {}
@@ -177,6 +190,15 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
     get_func = get_func or video._download
     results = []
     successes = {}
+    # Explicit workspace reuse still revalidates bytes through the importers.
+    from recovery_imports import RecoveredCdnCollection, RecoveredHOnlyCollection
+    staged = {}
+    for category, filename, factory in (
+            ('recovered-videos', 'cdn-recovery-v0.1.json', RecoveredCdnCollection),
+            ('recovered-h-only', honly.REPORT_NAME, RecoveredHOnlyCollection)):
+        folder = project / RECOVERY_DIR / category
+        if (folder / filename).exists():
+            staged[category] = factory(folder)
     if len(rows) > 512 or sum(len(_type_candidates(r, peers)) for r in rows) > 2048:
         raise w.ExportError('Recovery probe count exceeds safe request budget')
     total_expected = sum(row['expected_cdn_size_bytes'] for row in rows)
@@ -188,7 +210,68 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
         candidates = _type_candidates(row, peers)
         record = {'namespace': row['namespace'], 'logical_path': logical,
             'expected_bytes': row['expected_cdn_size_bytes'],
+            'expected_hash_base64': row['expected_hash_base64'],
+            'cache_source_reason': row.get('source_reason', 'not-reported'),
             'type_candidates': [f'{x:X}' for x in candidates], 'download_attempts': []}
+        local_candidates = local.candidates(row) if local is not None else []
+        if local_candidates:
+            record['local_candidates'] = [str(p) for _, p in local_candidates]
+            try:
+                if len(local_candidates) != 1:
+                    raise w.ExportError('Ambiguous local assets for this manifest identity')
+                type_id, source = local_candidates[0]
+                raw = local.read(source, row['expected_cdn_size_bytes'])
+                oodle = oodle or w.Oodle(PROJECT)
+                checks = _validate_payload(raw, row, type_id, oodle)
+                checks['provenance'] = {'kind': 'user-supplied-local-asset',
+                    'source_root': str(local.root), 'source_path': str(source),
+                    'source_sha256': checks['sha256'],
+                    'authentication_scope': 'manifest H identity, type, container size and CRC; not a historical whole-object digest'}
+            except (OSError, ValueError, w.ExportError) as exc:
+                record.update(status='local-source-unreadable' if isinstance(exc, OSError) else 'local-source-rejected',
+                    error=str(exc)[:400])
+                results.append(record)
+                continue  # Invalid explicit evidence must never silently fall back to CDN.
+            # Staging failures are output failures, not unreadable source evidence.
+            if download:
+                path = _object_path(project, row, type_id)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path.exists() or path.is_symlink():
+                    if path.is_symlink() or path.stat().st_size != len(raw) or path.read_bytes() != raw:
+                        raise w.ExportError('Existing local recovery destination differs from validated source')
+                else:
+                    w.atomic_write(path, raw)
+            record.update(checks)
+            record.update(status='recovered-validated' if download else 'local-asset-validated',
+                cdn_type_hex=f'{type_id:X}')
+            successes[key] = (type_id, checks)
+            print(f'{color_label("Verified local")} {row["namespace"]}{logical} | {source}')
+            results.append(record)
+            continue
+        collection = staged.get(_category(row))
+        if collection is not None:
+            asset = w.ManifestAsset(row['namespace'], row['manifest_section'], logical,
+                base64.b64decode(row['expected_hash_base64'].replace('-', '/') + '==', validate=True),
+                int(row['manifest_flags'], 16) | row['expected_cdn_size_bytes'])
+            oodle = oodle or w.Oodle(PROJECT)
+            payload = collection.validate_asset(asset, oodle)
+            if payload is not None:
+                raw, type_id = (payload, 0xAA) if _category(row) == 'recovered-videos' else payload
+                checks = _validate_payload(raw, row, type_id, oodle)
+                previous = collection.rows[key]
+                if 'provenance' in previous:
+                    checks['provenance'] = previous['provenance']
+                record.update(checks)
+                record.update(status='already-verified-locally', cdn_type_hex=f'{type_id:X}',
+                    reused_staged_copy=True)
+                successes[key] = (type_id, checks)
+                results.append(record)
+                continue
+        if offline:
+            record.update(status='unresolved', error='No matching local asset; network disabled',
+                local_source_status='no-matching-candidate' if local else 'not-supplied')
+            results.append(record)
+            continue
         matched = []
         for type_id in candidates:
             url = triage.make_cdn_url(row, type_id)
@@ -249,9 +332,14 @@ def run(project: Path, *, download: bool, timeout: float = 20.0,
     if download:
         _collection_reports(project, rows, successes)
     summary = {'required': len(rows), 'fully_verified': len(successes),
+        'validated_local_assets': sum(r.get('provenance', {}).get('kind') == 'user-supplied-local-asset' for r in results),
         'head_confirmed_only': sum(r['status'] == 'head-confirmed-payload-not-verified' for r in results),
-        'unavailable_or_failed': sum(r['status'] in ('unresolved', 'download-failed') for r in results)}
+        'unavailable_or_failed': sum(r['status'] in ('unresolved', 'download-failed', 'local-source-rejected', 'local-source-unreadable') for r in results)}
     report = {'version': VERSION, 'kind': 'manifest-cdn-recovery' if download else 'manifest-cdn-probe',
+        'status': ('complete' if len(successes) == len(rows) else
+            'probe-complete' if not download and len(successes) + summary['head_confirmed_only'] == len(rows)
+            else 'incomplete-sources'),
+        'network_enabled': not offline, 'local_asset_source': str(local.root) if local else None,
         'created_utc': _stamp(), 'summary': summary, 'objects': results}
     inventory.save_report(project / (RECOVERY_REPORT if download else PROBE_REPORT), report)
     return report
@@ -264,15 +352,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--target', required=True, type=Path)
     parser.add_argument('--base', required=True, type=Path)
     parser.add_argument('--source-patch', type=Path)
+    parser.add_argument('--local-assets', type=Path, help='Read-only folder of manifest-addressed asset files')
+    parser.add_argument('--offline', action='store_true', help='Disable all HEAD/GET requests')
+    parser.add_argument('--workspace', type=Path, default=PROJECT, help='Inventory/recovery report directory')
     parser.add_argument('--timeout', type=float, default=20.0)
     parser.add_argument('--retries', type=int, default=5)
     args = parser.parse_args(argv)
     try:
-        report = run(PROJECT, download=args.download, timeout=args.timeout,
-            fresh_sources=(args.target, args.base, args.source_patch), retries=args.retries)
+        report = run(args.workspace, download=args.download, timeout=args.timeout,
+            fresh_sources=(args.target, args.base, args.source_patch), retries=args.retries,
+            local_assets=args.local_assets, offline=args.offline)
         counts = report['summary']
         return 0 if counts['fully_verified'] == counts['required'] or (
-            args.probe and counts['fully_verified'] + counts['head_confirmed_only'] == counts['required']) else 2
+            args.probe and counts['fully_verified'] + counts['head_confirmed_only'] == counts['required']) else 3
     except KeyboardInterrupt:
         print_error('Interrupted; no output patch was published')
         return 130

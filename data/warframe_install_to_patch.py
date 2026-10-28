@@ -435,7 +435,12 @@ def _cache_namespace_from_package(package: str) -> str:
         return "0" + language.group(1)
     return "0"
 
-def iter_toc_entries(toc_path: Path, kind: str, package: str):
+def iter_toc_entries(toc_path: Path, kind: str, package: str, *, deleted_only: bool = False):
+    """Read live TOC records, or inspect deleted records for read-only recovery diagnostics.
+
+    Deleted records are never exposed to the ordinary cache index. A deleted
+    record may point to overwritten data and must be verified independently.
+    """
     try:
         data = toc_path.read_bytes()
     except OSError as exc:
@@ -465,10 +470,15 @@ def iter_toc_entries(toc_path: Path, kind: str, package: str):
         if cache_offset == -1:
             directories.append(logical_path)
             continue
-        if timestamp == 0:
+        deleted = timestamp == 0
+        if deleted != deleted_only:
             continue
         if cache_offset < 0 or compressed_len < 0 or length < 0:
+            if deleted:
+                continue  # Tombstones may have their byte locations cleared.
             raise ExportError(f"Invalid live TOC entry for {logical_path} in {toc_path.name}")
+        if deleted and (compressed_len == 0 or length == 0):
+            continue  # A zero-length tombstone has no recoverable payload.
         yield CacheEntry(
             kind=kind,
             package=package,

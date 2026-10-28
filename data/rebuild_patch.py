@@ -202,16 +202,19 @@ class CleanRunError(RuntimeError):
 class HCacheVerificationError(CleanRunError):
     """Downloaded object failed semantic verification; never use a silent fallback."""
 
+class IncompleteSources(CleanRunError):
+    """Valid recovery work cannot yet supply every required object."""
+
 from common import PlainLogTee as Tee, error as print_error, warning as print_warning
 
 def write_json(path: Path, data: dict) -> None:
     restore.save_report(path, data)
 
 def validate_roots(target: Path, base: Path, u4401: Path | None, output: Path,
-        workspace: Path, report_dir: Path) -> None:
-    sources = [x.resolve(strict=True) for x in (target, base, u4401) if x is not None]
+        workspace: Path, report_dir: Path, local_assets: Path | None = None) -> None:
+    sources = [x.resolve(strict=True) for x in (target, base, u4401, local_assets) if x is not None]
     if len(set(sources)) != len(sources) or not all(x.is_dir() for x in sources):
-        raise CleanRunError('Target, Steam base and optional source patch must be distinct directories')
+        raise CleanRunError('Installations and optional recovery sources must be distinct directories')
     writable = [x.resolve(strict=False) for x in (output, workspace, report_dir)]
     if any(a == b or a.is_relative_to(b) or b.is_relative_to(a)
            for i, a in enumerate(sources) for b in sources[i+1:]):
@@ -224,7 +227,7 @@ def validate_roots(target: Path, base: Path, u4401: Path | None, output: Path,
         if any(dest == other or dest.is_relative_to(other) or other.is_relative_to(dest)
                for other in writable[i+1:]):
             raise CleanRunError('Output, recovery workspace and reports directories must not overlap')
-    if any(path.is_symlink() for path in (target, base, u4401, output.parent,
+    if any(path.is_symlink() for path in (target, base, u4401, local_assets, output.parent,
             workspace.parent, report_dir.parent) if path is not None):
         raise CleanRunError('Root directory symlink detected; refusing unsafe reconstruction')
     if output.exists() or output.is_symlink():
@@ -262,7 +265,7 @@ def check_target_executable(target: Path, baseline: dict, report_dir: Path, phas
         raise CleanRunError(f'Reference executable changed during this run ({phase}); refusing publication')
 
 def read_only_snapshot(root: Path, *, full_hash: bool) -> dict:
-    return fingerprint.snapshot(root, all_cache=full_hash)
+    return fingerprint.snapshot(root, all_cache=full_hash, progress=True)
 
 def check_source_unchanged(target: Path, base: Path, baselines: dict,
         report_dir: Path, phase: str, full_hash: bool) -> None:
@@ -324,6 +327,10 @@ def stash_workspace_reports(workspace: Path, report_dir: Path) -> None:
 def build(args: argparse.Namespace, *, work_parent: Path | None = None,
         report_root: Path | None = None, run_id: str | None = None) -> int:
     target, base, u4401 = args.target, args.base, args.u4401
+    local_assets = getattr(args, 'local_assets', None)
+    offline_mode = getattr(args, 'offline', False)
+    if offline_mode and (getattr(args, 'stripped_cdn_fallback', False) or getattr(args, 'h_cache_build_label', None)):
+        raise CleanRunError('Offline mode conflicts with explicit network recovery options')
     if work_parent is None:
         work_parent = Path(target.resolve(strict=False).anchor) / 'WF-Rebuild'
     if report_root is None:
@@ -336,7 +343,7 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
     # The report root is independently protected even when an input is missing
     # or another preflight check fails, so failed initialization has a JSON log.
     report_real = report_dir.resolve(strict=False)
-    for source in (target, base, u4401):
+    for source in (target, base, u4401, local_assets):
         if source is None:
             continue
         protected = source.resolve(strict=False)
@@ -353,7 +360,8 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
         'run_id': run_id, 'status': 'started', 'phase': 'init',
         'reference': str(target), 'steam_base': str(base),
         'exact_source_patch': str(u4401) if u4401 is not None else None, 'patch_output': str(output),
-        'report_folder': str(report_dir), 'network': 'manifest-addressed CDN URLs plus optional H.Cache lookup',
+        'local_asset_source': str(local_assets) if local_assets is not None else None,
+        'report_folder': str(report_dir), 'network': 'disabled' if offline_mode else 'manifest-addressed CDN URLs plus optional H.Cache lookup',
         'sources_from_failed_runs': False, 'force_unchanged_runtime_resources': False,
         'all_stripped': bool(getattr(args, 'all_stripped', False)),
         'scope': [], 'limitations': [
@@ -368,18 +376,20 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
         with contextlib.redirect_stdout(Tee(sys.stdout, logfile)), contextlib.redirect_stderr(Tee(sys.stderr, logfile)):
             try:
                 workflow['phase'] = 'validate-inputs'
-                validate_roots(target, base, u4401, output, workspace, report_dir)
+                validate_roots(target, base, u4401, output, workspace, report_dir, local_assets)
                 print(f'[Clean] Untouched final installation: {target}')
                 print(f'[Clean] Original Steam base: {base}')
                 if u4401 is not None:
                     print(f'[Clean] Exact recovery source patch: {u4401}')
-                else:
+                elif not offline_mode:
                     print('[Clean] No source patch supplied; trying manifest-identical CDN objects')
+                if local_assets is not None:
+                    print(f'[Clean] Read-only local asset source: {local_assets}')
                 print(f'[Clean] New isolated recovery workspace: {workspace}')
                 print(f'[Clean] Fresh final patch destination: {output}')
                 print(f'[Clean] Permanent reports: {report_dir}')
                 print('[Clean] Fresh manifest inventory; no prior recovery reports used')
-                print('[Network] Manifest-addressed recovery; optional original H.Cache lookup.')
+                print('[Network] Disabled.' if offline_mode else '[Network] Manifest-addressed recovery; optional original H.Cache lookup.')
                 workflow['phase'] = 'verify-installed-dependencies'
                 needed = ('pefile', 'capstone', 'numpy')
                 missing = [module for module in needed if importlib.util.find_spec(module) is None]
@@ -410,11 +420,20 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 workflow['phase'] = 'manifest-source-recovery'
                 recovery = historical.run(workspace, download=True, timeout=args.cdn_timeout,
                     oodle=oodle, retries=args.cdn_retries,
-                    fresh_sources=(target, base, u4401))
+                    fresh_sources=(target, base, u4401), local_assets=local_assets, offline=offline_mode)
                 required = recovery['summary']['required']
                 recovered = recovery['summary']['fully_verified']
+                workflow['recovery_summary'] = recovery['summary']
+                workflow['unresolved_objects'] = [
+                    {key: item.get(key) for key in ('namespace', 'logical_path', 'status', 'cache_source_reason', 'error')}
+                    for item in recovery['objects']
+                    if item['status'] not in ('recovered-validated', 'already-verified-locally')]
                 if recovered != required:
-                    raise CleanRunError(f'Only {recovered}/{required} missing CDN objects recovered; refusing publication')
+                    for item in workflow['unresolved_objects']:
+                        print(f'[Missing] {item["namespace"]}{item["logical_path"]} | '
+                            f'{item["cache_source_reason"]} | {item["error"]}', flush=True)
+                    raise IncompleteSources(f'{recovered}/{required} missing objects validated; '
+                        f'{required - recovered} remain unresolved (see recovery report); refusing incomplete publication')
                 comparison_file = workspace / historical.COMPARISON_REPORT
                 source_comparison = json.loads(comparison_file.read_text(encoding='utf-8'))
                 totals = source_comparison['summary']
@@ -435,7 +454,8 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                         and x.get('cdn_type_hex') != 'AA' for x in recovery['objects'])):
                     raise CleanRunError('Verified H-only recovery folder is missing')
                 print(f'[Recovery] {verified_source} exact objects from source patch; '
-                    f'{recovered} manifest-addressed CDN objects')
+                    f'{recovered} validated recovery objects '
+                    f'({recovery["summary"].get("validated_local_assets", 0)} from local assets)')
                 inventory_report = json.loads((workspace / f'missing-source-v{w.VERSION}.json').read_text(encoding='utf-8'))
                 declared = inventory_report.get('summary', {}).get('available_manifest_families')
                 if not isinstance(declared, list) or not declared:
@@ -481,6 +501,10 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                         raise CleanRunError('Reconstructed H.Cache metadata is missing from staging')
                     reconstructed = metadata.read_bytes()
                     expected_h = stripped_archive._decoded_sections(reconstructed, oodle, kinds='H')['H']
+                    if offline_mode:
+                        workflow['original_h_cache'] = {'status': 'offline', 'source': 'local'}
+                        print('[H.Cache] Offline; keeping verified local reconstruction')
+                        return result
                     explicit = getattr(args, 'h_cache_build_label', None)
                     archive_key = (normalize_archive_key(explicit) if explicit else
                         original_h_cache_archive_key(w._find_target_exe(target), expected_h))
@@ -571,6 +595,11 @@ def build(args: argparse.Namespace, *, work_parent: Path | None = None,
                 workflow['actual_objects'] = json.loads(post_path.read_text(encoding='utf-8'))['counts']['patch_deep_verified']
                 print(f'[Done] {workflow["actual_objects"]:,} deep-audited CDN objects published at {output}')
                 print('[Not tested] Actual gameplay/patch application still needs an independent clean-base test.')
+            except IncompleteSources as exc:
+                code = 3
+                workflow['status'] = 'incomplete-sources'
+                workflow['message'] = str(exc)
+                print_warning(f'Incomplete sources: {exc}')
             except (Exception, KeyboardInterrupt) as exc:
                 if isinstance(exc, KeyboardInterrupt):
                     code = 130
@@ -613,11 +642,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--target', type=Path, required=True)
     parser.add_argument('--base', type=Path, required=True)
     parser.add_argument('--u4401', type=Path)
+    parser.add_argument('--local-assets', type=Path)
+    parser.add_argument('--offline', action='store_true')
     parser.add_argument('--output-parent', type=Path, required=True)
     parser.add_argument('--work-parent', type=Path,
         help='optional SHORT temporary parent directory (default: <target drive>\\WF-Rebuild)')
     parser.add_argument('--report-root', type=Path, help='optional permanent report parent directory')
     parser.add_argument('--cdn-timeout', type=float, default=30.0)
+    parser.add_argument('--cdn-retries', type=int, default=5)
     parser.add_argument('--full-source-hash', action='store_true',
         help='SHA-256 every .cache file as well as all TOCs before and after each phase (slower)')
     parser.add_argument('--keep-failed-output', action='store_true',
@@ -627,6 +659,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not 1 <= args.cdn_timeout <= 120:
         parser.error('--cdn-timeout must be 1..120 seconds')
+    if not 1 <= args.cdn_retries <= 20:
+        parser.error('--cdn-retries must be 1..20')
     try:
         return build(args, work_parent=args.work_parent, report_root=args.report_root)
     except (OSError, ValueError, CleanRunError, w.ExportError) as exc:

@@ -313,12 +313,168 @@ def verify_base_inheritance(report: dict, base_root: Path) -> dict:
         'objects': classified,
     }
 
+def _scan_residual_entries(cache: Path, wanted: set[tuple[str, str]]):
+    """Index only requested H/F paths, including normally ignored TOC tombstones.
+
+    Reading an old TOC record does not imply its cache bytes still exist. The
+    caller verifies offsets, decoding and H identity before reporting candidates.
+    """
+    index = {}
+    for kind in 'HF':
+        for toc_path in sorted(cache.glob(f'{kind}.*.toc'), key=lambda p: p.name.casefold()):
+            if toc_path.is_symlink() or not toc_path.is_file():
+                raise w.ExportError(f'Unsafe cache TOC: {toc_path}')
+            package = toc_path.name[2:-4]
+            if not package:
+                continue
+            for deleted in (False, True):
+                for entry in w.iter_toc_entries(toc_path, kind, package, deleted_only=deleted):
+                    key = (entry.namespace, entry.logical_path)
+                    if key in wanted:
+                        slot = index.setdefault(key, {}).setdefault(kind, [])
+                        if len(slot) >= 64:
+                            raise w.ExportError(f'Too many historical TOC records for {entry.namespace}{entry.logical_path}')
+                        slot.append((entry, deleted))
+    return index
+
+def _probe_residual_source(index: dict, row: dict, oodle: w.Oodle) -> dict:
+    """Conservatively classify readable cache pieces; never reconstruct unknown F bytes."""
+    namespace, logical = row['namespace'], row['logical_path']
+    encoded = row['expected_hash_base64']
+    if not isinstance(encoded, str) or not re.fullmatch(r'[A-Za-z0-9+\-]{22}', encoded):
+        raise w.ExportError(f'Invalid manifest hash: {namespace}{logical}')
+    digest = base64.b64decode(encoded.replace('-', '/') + '==', validate=True)
+    if len(digest) != 16 or w.b64m_encode(digest) != encoded:
+        raise w.ExportError(f'Noncanonical manifest digest: {namespace}{logical}')
+    required = w._required_piece_kinds(int(row['manifest_hbf_flags_hex'], 16))
+    if required not in ('', 'F'):
+        raise w.ExportError(f'Unexpected missing-asset flags: {namespace}{logical}')
+    pieces = index.get((namespace, logical), {})
+    found = {'H': {'live': 0, 'deleted': 0}, 'F': {'live': 0, 'deleted': 0}}
+    valid_h = []
+    valid_f = []
+    read_errors = []
+    for kind in 'HF':
+        for entry, deleted in pieces.get(kind, []):
+            label = 'deleted' if deleted else 'live'
+            found[kind][label] += 1
+            try:
+                # Do not trust stale TOC offsets: decompression checks their
+                # declared bounds and decoded byte count against cache bytes.
+                decoded = w.decompress_cache_entry(entry, oodle)
+            except (w.ExportError, OSError, ValueError) as exc:
+                if len(read_errors) < 6:
+                    read_errors.append(f'{kind} {label} {entry.package}: {exc}')
+                continue
+            item = {'package': entry.package, 'toc_state': label,
+                'decoded_bytes': len(decoded)}
+            if kind == 'H' and decoded[:16] == digest:
+                valid_h.append(item)
+            elif kind == 'F':
+                valid_f.append(item)
+    paired = sorted({(h['package'], h['toc_state'], f['toc_state'])
+        for h in valid_h for f in valid_f if h['package'] == f['package']})
+    # A local F without matching H cannot be authenticated from the manifest.
+    if valid_h and (not required or paired):
+        status = 'candidate-matching-h-and-required-pieces'
+    elif valid_h:
+        status = 'matching-h-but-required-f-missing'
+    elif valid_f:
+        status = 'readable-f-without-matching-h'
+    else:
+        status = 'no-matching-readable-pieces'
+    return {'status': status, 'toc_entries': found,
+        'matching_h_entries': valid_h,
+        'readable_f_entries': valid_f,
+        'same_package_h_f_pairs': [{'package': p, 'h_state': h, 'f_state': f}
+            for p, h, f in paired], 'read_errors': read_errors}
+
+def _probe_residual_from_run(target: Path, base: Path, run_report: Path) -> dict:
+    """Analyze missing objects from one unchanged run, without rescanning all manifests."""
+    import source_inventory as inventory
+    report = json.loads(run_report.read_text(encoding='utf-8'))
+    docs = report.get('details', {})
+    missing = docs.get(f'missing-source-v{w.VERSION}.json')
+    inherited = docs.get(f'base-inheritance-v{w.VERSION}.json')
+    snapshot = docs.get(inventory.SOURCE_SNAPSHOT_NAME)
+    if (not isinstance(missing, dict) or not isinstance(inherited, dict)
+            or not isinstance(snapshot, dict)
+            or missing.get('report_version') != w.VERSION
+            or inherited.get('version') != w.VERSION):
+        raise w.ExportError('Run JSON lacks compatible missing-source, inheritance or source-snapshot reports')
+    if inventory.source_snapshot(target, base) != snapshot:
+        raise w.ExportError('Source TOCs/cache files or executable differ from this run; use a current run report')
+    candidates = missing.get('missing_objects')
+    inheritance = inherited.get('objects')
+    if not isinstance(candidates, list) or not isinstance(inheritance, list):
+        raise w.ExportError('Invalid inventory arrays in run report')
+    if (len(candidates) != missing.get('summary', {}).get('source_missing')
+            or len(inheritance) != inherited.get('summary', {}).get('source_missing_in_target')):
+        raise w.ExportError('Mismatched source-inventory counts')
+    base_status = {}
+    for item in inheritance:
+        key = (item['namespace'], item['logical_path'])
+        if key in base_status:
+            raise w.ExportError('Repeated asset in inheritance inventory')
+        base_status[key] = item['status']
+    remaining = []
+    seen = set()
+    for row in candidates:
+        key = (row['namespace'], row['logical_path'])
+        if key in seen or key not in base_status:
+            raise w.ExportError('Unmatched or repeated missing asset in inventory')
+        seen.add(key)
+        if base_status[key] == 'verified-in-base':
+            continue
+        if base_status[key] != 'not-fully-in-base':
+            raise w.ExportError('Original Steam base has unreadable or unclassified assets')
+        w._validate_manifest_namespace(key[0])
+        w._validate_logical_path(key[1])
+        remaining.append(row)
+    if len(remaining) > 512:
+        raise w.ExportError('Residual probe exceeds 512 missing assets')
+    wanted = {(row['namespace'], row['logical_path']) for row in remaining}
+    oodle = w.Oodle(Path(w.__file__).resolve().parent)
+    sources = {}
+    for label, root in (('target', target), ('steam-base', base)):
+        cache = w.find_cache_windows_dir(root)
+        print(f'[Residual] Scanning live and deleted H/F TOC records in {label}: {cache}')
+        sources[label] = _scan_residual_entries(cache, wanted)
+    items = []
+    for row in remaining:
+        item = {'namespace': row['namespace'], 'logical_path': row['logical_path'],
+            'manifest_hash': row['expected_hash_base64'],
+            'expected_cdn_bytes': row['expected_cdn_size_bytes'],
+            'required_pieces': row['required_pieces'],
+            'target': _probe_residual_source(sources['target'], row, oodle),
+            'steam_base': _probe_residual_source(sources['steam-base'], row, oodle)}
+        items.append(item)
+    groups = Counter(v['status'] for item in items for v in (item['target'], item['steam_base']))
+    possible = [item for item in items if any(
+        item[x]['status'] == 'candidate-matching-h-and-required-pieces'
+        for x in ('target', 'steam_base'))]
+    return {'version': w.VERSION, 'kind': 'offline-cache-residual-probe',
+        'generated_utc': datetime.now(timezone.utc).isoformat(),
+        'input_run': str(run_report.resolve()), 'target': str(target), 'steam_base': str(base),
+        'summary': {'external_dependencies_examined': len(items),
+            'matching_h_and_required_pieces_candidates': len(possible),
+            'no_complete_matching_local_source': len(items) - len(possible),
+            'source_statuses': dict(groups)},
+        'limitations': [
+            'Only TOC-addressable bytes are inspected; arbitrary unindexed cache gaps are not scanned.',
+            'Deleted TOC records can point to overwritten bytes; all candidate H bytes are checked against the manifest.',
+            'Even a matching H and readable F cannot prove the exact original historical F bytes without stronger evidence.',
+            'This probe is read-only and does not use CDN data or a later update patch; candidates are NOT imported into the export.'
+        ], 'objects': items}
+
 def main(argv: list[str] | None = None) -> int:
     parser = StrictArgumentParser(description=__doc__)
     parser.add_argument('target', type=Path, help='Warframe target installation (or Cache.Windows directory)')
     parser.add_argument('base', type=Path, help='original Steam depot installation (or Cache.Windows directory)')
     parser.add_argument('-o', '--output', type=Path, default=Path('missing-source-v0.1.json'))
     parser.add_argument('--csv', type=Path, help='optional CSV output file with one row per missing object')
+    parser.add_argument('--residual-run-report', type=Path,
+        help='Read-only offline probe of live/deleted H/F TOC records for missing assets from a completed run JSON')
     parser.add_argument('--progress-every', type=int, default=25_000,
         help='print scan progress every N manifest objects (0 to suppress)')
     args = parser.parse_args(argv)
@@ -335,6 +491,19 @@ def main(argv: list[str] | None = None) -> int:
         for path in (json_path, csv_path):
             if path is not None:
                 _outside_sources(path, (target, base))
+        if args.residual_run_report is not None:
+            if csv_path is not None:
+                raise w.ExportError('--csv cannot be combined with --residual-run-report')
+            result = _probe_residual_from_run(target, base, args.residual_run_report)
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            with json_path.open('x', encoding='utf-8') as handle:
+                json.dump(result, handle, ensure_ascii=False, indent=2)
+                handle.write('\n')
+            totals = result['summary']
+            print(f"[Residual] Matching H + required pieces: {totals['matching_h_and_required_pieces_candidates']}/"
+                  f"{totals['external_dependencies_examined']} (candidate only, not exact CDN verification)")
+            print(f'[Report] JSON: {json_path}')
+            return 0
         print('[Inspect] Source availability follows the exporter\'s H-hash and required B/F-package checks.')
         print('[Inspect] Both installations remain read-only. Missing language/DX manifests are excluded.')
         result = analyze(target, base, progress_every=args.progress_every)

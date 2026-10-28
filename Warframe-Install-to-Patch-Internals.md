@@ -101,8 +101,29 @@ passes. Interactive status colors match NCT; logs remain ANSI-free.
 | `data/rebuild_patch.py`, `data/source_inventory.py` | Clean source workflow and recovery staging |
 | `data/inspect_*`, `data/compare_sources.py` | Installed-source inventory and exact-object comparison |
 | `data/recover_manifest_sources.py`, `data/recovery_imports.py` | Verified historical CDN and local source recovery |
+| `data/local_asset_source.py` | Read-only local asset discovery and bounded source reads |
 | `data/installed_type_resolver.py` | Native PE/Packages-based CDN type resolution |
 | `data/offline_patch_audit.py`, `data/stripped_archive.py` | Deep validation, stripped enrichment and video audit |
 | `data/export_transaction.py`, `data/common.py` | Safe publication, source fingerprints, HTTP retry and logging |
 
 The required x64 `data/oo2core_9.dll` is bundled and SHA-256 pinned.
+
+## Explicit local asset fallback
+
+`install_to_patch.py --local-assets DIR` supplies loose `name!TYPE_HASH` assets for manifest objects absent from both installed caches. The collector searches recursively, refuses links and ambiguous candidates, and reads only matching files with the expected byte count. An existing exact source patch retains precedence when one was explicitly supplied.
+
+The recovery layer validates H identity/type, SHCC structure, manifest container size and CRC before staging a copy. It supports the existing H+F video and H-only recovery categories. The existing recovery importers revalidate staged files before export; source provenance (absolute original path, source root, SHA-256 and validation scope) travels with both recovery reports and collection reports. No cache is modified.
+
+`--offline` skips HEAD/GET, peer-type inference for network probes, and optional original H.Cache lookup. It conflicts with explicitly requested stripped CDN fallback or H.Cache archive lookup. Successful local objects are retained in the isolated workspace with `-k`; missing objects remain individually listed and prevent publication. Invalid or unreadable matching local files are reported as `local-source-rejected` or `local-source-unreadable`, with no silent CDN substitution. Cache causes are retained separately in `cache_source_reason` (for example, absent H versus mismatching H hash).
+
+The local directory may include unrelated assets; only identities required by the current manifest inventory are selected. Manifest H identity and CRC do not independently authenticate historical F bytes using a whole-object cryptographic manifest hash.
+
+Explicit retained-workspace diagnostics consult existing video/H-only collection reports before declaring an offline miss. The normal importers revalidate staged bytes and SHA-256, including H-only objects without network peer-type inference, and preserve their source provenance. Corrupt staged collections fail validation. Fresh public builds do not automatically reuse old workspaces.
+
+Missing sources stop publication with `incomplete-sources` and exit code 3. Both the workflow and consolidated public JSON expose recovery totals and the unresolved-object list; exceptions unrelated to unavailable sources retain failure status. Fingerprinting progress is informational only: all previously selected SHA-256 inputs are still read in full.
+
+## Offline residual recovery probe
+
+`inspect_missing_source.py --residual-run-report` compares a completed run's source snapshot against the pristine target and Steam base before inspecting historical TOC records. It checks both live and timestamp-zero entries for the 103-style unresolved assets, validates each readable H entry against the original manifest hash, and checks whether required F bytes still exist in the same package. No CDN queries, patch imports, or source modifications occur.
+
+**Limits:** A deleted TOC record may point to overwritten bytes; a matching CommonHeader does not cryptographically identify the full historical video payload. The probe deliberately marks these as *candidates*, not verified recoveries. It cannot reconstruct video data missing from every supplied cache, and it does not scan arbitrary unindexed cache gaps. The normal exporter continues to use strict exact-identity sources.

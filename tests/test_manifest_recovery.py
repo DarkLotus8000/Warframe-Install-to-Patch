@@ -52,6 +52,10 @@ class TestManifestDrivenRecovery(unittest.TestCase):
         self.source = self.root / 'source'
         self.content = self.source / 'OpenWF' / 'Content'
         self.content.mkdir(parents=True)
+        self.target = self.root / 'target'
+        self.base = self.root / 'base'
+        self.target.mkdir()
+        self.base.mkdir()
         self.oodle = object()
 
     def put(self, r: dict, type_id: int, raw: bytes) -> Path:
@@ -153,7 +157,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
              patch.object(recovery, '_report_inputs', return_value=[missing_video, missing_h]), \
              patch.object(h_only, 'infer_peer_types', return_value=fake_peers):
             result = recovery.run(self.project, download=True, timeout=1, retries=1,
-                fresh_sources=(self.root, self.root, self.source), oodle=self.oodle,
+                fresh_sources=(self.target, self.base, self.source), oodle=self.oodle,
                 head_func=head, get_func=get)
         self.assertEqual(result['summary']['fully_verified'], 2)
         self.assertEqual(result['summary']['required'], 2)
@@ -183,7 +187,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
                 with patch.object(recovery.inventory, 'load_manifest_inventory', return_value=({}, [item])), \
                      patch.object(recovery, '_report_inputs', return_value=[item]):
                     result = recovery.run(self.project, download=True, timeout=1, retries=1,
-                        fresh_sources=(self.root, self.root, None), oodle=self.oodle,
+                        fresh_sources=(self.target, self.base, None), oodle=self.oodle,
                         head_func=head, get_func=get)
                 self.assertEqual(result['summary']['fully_verified'], 1)
                 self.assertEqual(result['objects'][0]['head_inconclusive']['http_status'], http_status)
@@ -199,7 +203,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
         with patch.object(recovery.inventory, 'load_manifest_inventory', return_value=({}, [item])), \
              patch.object(recovery, '_report_inputs', return_value=[item]):
             result = recovery.run(self.project, download=False, timeout=1,
-                fresh_sources=(self.root, self.root, None), oodle=self.oodle,
+                fresh_sources=(self.target, self.base, None), oodle=self.oodle,
                 head_func=lambda url, timeout: {'http_status': 405, 'content_length': None},
                 get_func=no_get)
         self.assertEqual(result['summary']['fully_verified'], 0)
@@ -217,7 +221,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
                 with patch.object(recovery.inventory, 'load_manifest_inventory', return_value=({}, [item])), \
                      patch.object(recovery, '_report_inputs', return_value=[item]):
                     result = recovery.run(self.project, download=True, timeout=1,
-                        fresh_sources=(self.root, self.root, None), oodle=self.oodle,
+                        fresh_sources=(self.target, self.base, None), oodle=self.oodle,
                         head_func=lambda url, timeout: {'http_status': status, 'content_length': length},
                         get_func=no_get)
                 self.assertEqual(result['summary']['fully_verified'], 0)
@@ -238,7 +242,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
              patch.object(recovery, '_report_inputs', return_value=[r]), \
              patch.object(h_only, 'infer_peer_types', return_value=peers):
             result = recovery.run(self.project, download=True, timeout=1, retries=1,
-                fresh_sources=(self.root, self.root, self.source), oodle=self.oodle,
+                fresh_sources=(self.target, self.base, self.source), oodle=self.oodle,
                 head_func=head, get_func=get)
         self.assertEqual(result['summary']['fully_verified'], 0)
         self.assertEqual(result['summary']['unavailable_or_failed'], 1)
@@ -263,7 +267,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
         with patch.object(recovery.inventory, 'load_manifest_inventory', return_value=({}, [first, second])), \
              patch.object(recovery, '_report_inputs', return_value=[first, second]):
             result = recovery.run(self.project, download=True, timeout=1, retries=1,
-                fresh_sources=(self.root, self.root, None), oodle=self.oodle,
+                fresh_sources=(self.target, self.base, None), oodle=self.oodle,
                 head_func=head, get_func=get)
         self.assertEqual(len(requests), 2)
         self.assertEqual(result['summary']['required'], 2)
@@ -297,7 +301,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
         with patch.object(recovery.inventory, 'load_manifest_inventory', return_value=({}, [])), \
              patch.object(recovery, '_report_inputs', return_value=[]):
             report = recovery.run(self.project, download=True, timeout=1, retries=1,
-                fresh_sources=(self.root, self.root, None), oodle=self.oodle,
+                fresh_sources=(self.target, self.base, None), oodle=self.oodle,
                 head_func=no_network, get_func=no_network)
         self.assertEqual(report['summary']['required'], 0)
         self.assertEqual(report['summary']['fully_verified'], 0)
@@ -340,7 +344,7 @@ class TestManifestDrivenRecovery(unittest.TestCase):
         with patch.object(recovery.inventory, 'load_manifest_inventory', return_value=({}, [item])), \
              patch.object(recovery, '_report_inputs', return_value=[item]):
             result = recovery.run(self.project, download=True, timeout=1, retries=1,
-                fresh_sources=(self.root, self.root, None), oodle=self.oodle,
+                fresh_sources=(self.target, self.base, None), oodle=self.oodle,
                 head_func=lambda url, timeout: {'http_status': 200, 'content_length': len(raw)},
                 get_func=lambda url, size, timeout: raw)
         self.assertEqual(result['summary']['fully_verified'], 1)
